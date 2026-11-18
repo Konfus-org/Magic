@@ -53,7 +53,7 @@ To take a picture of a failure, use `Screenshot.ps1` with `-AllowErrors` and `-W
 
 A gem that records passes reports a failure in its `Render`:
 
-1. Call `RenderGraph.Fail` with a `RenderFailure` kind, a short constant text for the picture, and the reason for
+1. Call `RenderFrame.Fail` with a `RenderFailure` kind, a short constant text for the picture, and the reason for
    the log.
 2. Return from the step for this frame. Do not record the passes that need what failed.
 3. Try again in the next frame. Call `Fail` again in each frame that still fails.

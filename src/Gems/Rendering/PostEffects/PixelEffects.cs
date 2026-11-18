@@ -25,7 +25,7 @@ namespace Magic.PostEffects;
 /// runs. An effect is left out while its material, its textures or its passes load, and when one of them failed.
 /// </para>
 /// </remarks>
-internal sealed class PixelEffects
+internal sealed class PixelEffects(IGraphicsApi gpu)
 {
     /// <summary>
     /// The most levels an effect's target has: the storage levels the heap keeps of a texture.
@@ -41,6 +41,8 @@ internal sealed class PixelEffects
         .. Enumerable.Range(0, 2 * MaterialSlots.Capacity).Select(i => $"Effect {i}"),
     ];
 
+    private readonly IGraphicsApi _gpu = gpu;
+
     /// <summary>
     /// The material of the effect at each place last frame, 0 where none ran, which tells whether its history is its
     /// own.
@@ -48,15 +50,15 @@ internal sealed class PixelEffects
     private readonly ulong[] _lastFrame = new ulong[MaterialSlots.Capacity];
 
     /// <summary>
-    /// Runs the effects that are ready, in order, over the view's picture on frame <paramref name="frameIndex"/>, each
+    /// Runs the effects that are ready, in order, over the view's picture in <paramref name="frame"/>, each
     /// with its material's row in <paramref name="rows"/> at its place.
     /// </summary>
     public void Record(
+        in RenderFrame frame,
         RenderGraph graph,
         in GpuView gpu,
         ReadOnlySpan<GpuEffect> effects,
-        GpuBuffer rows,
-        uint frameIndex
+        GpuBuffer rows
     )
     {
         // With no effect ready, none runs and the picture stays in the HDR target, so nothing is asked for. A failed
@@ -66,7 +68,7 @@ internal sealed class PixelEffects
         {
             isAnyReady |= effect.State == GpuState.Ready;
             if (effect is { State: GpuState.Failed, Material: not 0 })
-                graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", "its material or its shader failed.");
+                frame.Fail(RenderFailure.PostEffect, "An effect is not drawn", "its material or its shader failed.");
         }
 
         if (!isAnyReady)
@@ -76,24 +78,26 @@ internal sealed class PixelEffects
             return;
         }
 
-        Result<GpuBuffer> passTable = graph.Buffer(
-            new("Effect passes", MaterialSlots.Capacity * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>())
+        Result<GpuBuffer> passTable = _gpu.GetBuffer(
+            new("Effect passes", MaterialSlots.Capacity * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>()),
+            frame.View
         );
-        Result<GpuTexture> otherPicture = graph.Texture(
+        Result<GpuTexture> otherPicture = _gpu.GetTexture(
             new(
                 "Effect picture",
                 gpu.Width,
                 gpu.Height,
                 GpuFormat.R16G16B16A16Sfloat,
                 TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
-            )
+            ),
+            frame.View
         );
-        Result<GpuSampler> sampler = graph.Sampler(
+        Result<GpuSampler> sampler = _gpu.GetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (Result.FindFailure(passTable, otherPicture, sampler) is { Ok: false } failed)
         {
-            graph.Fail(RenderFailure.PostEffect, "Effects are not drawn", failed.Error);
+            frame.Fail(RenderFailure.PostEffect, "Effects are not drawn", failed.Error);
 
             return;
         }
@@ -132,18 +136,18 @@ internal sealed class PixelEffects
 
             // Its target and, with a history, the one the frame before filled, the two swapping by the frame's parity;
             // none without levels. Without a history it fills the same one each frame.
-            int filled = (2 * place) + (needs.HasHistory ? (int)(frameIndex % 2) : 0);
+            int filled = (2 * place) + (needs.HasHistory ? (int)(frame.Index % 2) : 0);
             Result<GpuTexture> target =
                 levels == 0
                     ? Result.Success(GpuTexture.None)
-                    : graph.Texture(GetTarget(_targetNames[filled], gpu, levels));
+                    : _gpu.GetTexture(GetTarget(_targetNames[filled], gpu, levels), frame.View);
             Result<GpuTexture> history =
                 levels == 0 || !needs.HasHistory
                     ? Result.Success(GpuTexture.None)
-                    : graph.Texture(GetTarget(_targetNames[filled ^ 1], gpu, levels));
+                    : _gpu.GetTexture(GetTarget(_targetNames[filled ^ 1], gpu, levels), frame.View);
             if (Result.FindFailure(target, history) is { Ok: false } unmade)
             {
-                graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", unmade.Error);
+                frame.Fail(RenderFailure.PostEffect, "An effect is not drawn", unmade.Error);
 
                 continue;
             }

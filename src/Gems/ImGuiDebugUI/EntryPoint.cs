@@ -1,5 +1,6 @@
 using Magic.Assets;
 using Magic.Ecs;
+using Magic.Graphics;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
@@ -21,6 +22,7 @@ public sealed class EntryPoint : IGem, IDisposable
         App app,
         AssetManager assets,
         IEcs ecs,
+        IGraphicsApi gpu,
         IInput? input = null,
         IClipboard? clipboard = null
     )
@@ -30,7 +32,7 @@ public sealed class EntryPoint : IGem, IDisposable
         Settings = settings;
         DebugUI = new DebugUI(settings, app, ecs, reports, input, clipboard);
         LogSink = new LogSink(settings, reports);
-        Renderer = new Renderer(assets);
+        Renderer = new Renderer(assets, gpu);
     }
 
     /// <summary>

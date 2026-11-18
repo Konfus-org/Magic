@@ -4,7 +4,6 @@ using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -43,6 +42,7 @@ public sealed class Renderer
     /// </summary>
     private readonly ClusteredGeometrySettings _settings;
     private readonly Threads _threads;
+    private readonly IGraphicsApi _gpu;
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
     private readonly ClusterPasses _passes;
@@ -57,14 +57,15 @@ public sealed class Renderer
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    internal Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
+    internal Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _settings = settings;
         _threads = threads;
+        _gpu = gpu;
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
-        _resources = new ClusterResources(clusters, assets, threads);
-        _passes = new ClusterPasses(assets);
+        _resources = new ClusterResources(clusters, assets, threads, gpu);
+        _passes = new ClusterPasses(assets, gpu);
     }
 
     public void Dispose()
@@ -77,22 +78,22 @@ public sealed class Renderer
     /// Keeps the models the world holds clustered on the GPU, once a frame for all its views, and makes the pools they
     /// are in; none while the shaders build or after the pools were not made.
     /// </summary>
-    public ClusterPools? Render(in Frame frame, RenderGraph graph, in ClusterPoolsInput input)
+    public ClusterPools? Render(in RenderFrame frame, RenderGraph graph, in ClusterPoolsInput input)
     {
         // A frame without a world because its maker is out lets the loading domain show: the failure is already told.
         // Otherwise the world is still loading, and the domain keeps waiting for the clusters.
         if (input.World is not { } world)
         {
-            if (graph.IsMakerOut<GpuWorld>())
+            if (frame.IsUnavailable<GpuWorld>())
                 EndLoading();
 
             return null;
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each.
-        GpuState shaders = graph.GetState(_passes.Shaders.AsSpan());
+        GpuState shaders = _gpu.GetState(_passes.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
-            Fail(graph, RenderFailure.Shader, "a shader of the clusters was not built.");
+            Fail(frame, RenderFailure.Shader, "a shader of the clusters was not built.");
 
         if (shaders != GpuState.Ready)
             return null;
@@ -100,7 +101,7 @@ public sealed class Renderer
         Result<ClusterPools> pools = _resources.Prepare(graph, world.Models.Span);
         if (!pools.Ok)
         {
-            Fail(graph, RenderFailure.Resource, pools.Error);
+            Fail(frame, RenderFailure.Resource, pools.Error);
 
             return null;
         }
@@ -111,7 +112,7 @@ public sealed class Renderer
             _loading is not null
             && world.PreparedDomains >= _domainsLoaded
             && !_resources.IsLoading
-            && graph.GetState(_passes.GetResolveShaders(world.MaterialShaders)) != GpuState.Loading
+            && _gpu.GetState(_passes.GetResolveShaders(world.MaterialShaders)) != GpuState.Loading
         )
         {
             EndLoading();
@@ -123,20 +124,20 @@ public sealed class Renderer
     /// <summary>
     /// Records the passes of the view of this turn in the geometry stage, over the pools the frame made.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
+    public void Render(in RenderFrame frame, RenderGraph graph, in ClusteredGeometryInput input)
     {
         // A frame without a view because its maker is out lets the loading domain show: the failure is already told.
         if (input.View is not { } gpu)
         {
-            if (graph.IsMakerOut<GpuView>())
+            if (frame.IsUnavailable<GpuView>())
                 EndLoading();
 
             return;
         }
 
-        Result recorded = _passes.Record(graph, gpu, input.Pools, _settings);
+        Result recorded = _passes.Record(frame, graph, gpu, input.Pools, _settings);
         if (!recorded.Ok)
-            Fail(graph, RenderFailure.Resource, recorded.Error);
+            Fail(frame, RenderFailure.Resource, recorded.Error);
     }
 
     /// <summary>
@@ -161,11 +162,11 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Tells the graph that the clusters are not drawn in this frame, and lets the loading domain show without them.
+    /// Tells the frame that the clusters are not drawn in this frame, and lets the loading domain show without them.
     /// </summary>
-    private void Fail(RenderGraph graph, RenderFailure kind, string reason)
+    private void Fail(in RenderFrame frame, RenderFailure kind, string reason)
     {
-        graph.Fail(kind, "Clusters are not drawn", reason);
+        frame.Fail(kind, "Clusters are not drawn", reason);
         EndLoading();
     }
 

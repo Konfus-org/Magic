@@ -18,7 +18,7 @@ namespace Magic.PostEffects;
 /// passes specialised to its shader, and what it declares it needs. An effect is ready once its material, its textures
 /// and its passes are, and failed when one of them failed.
 /// </remarks>
-internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Threads threads)
+internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Threads threads, IGraphicsApi gpu)
 {
     /// <summary>
     /// The places in the list a frame runs, the post processing's.
@@ -72,12 +72,13 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
     /// uploads their rows.
     /// </summary>
     public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(
+        in RenderFrame frame,
         RenderGraph graph,
         MaterialSlots list,
         TextureLookup textures
     )
     {
-        Result<GpuBuffer> rows = graph.Buffer(new("Effect rows", _rows.Length * sizeof(uint)));
+        Result<GpuBuffer> rows = gpu.GetBuffer(new("Effect rows", _rows.Length * sizeof(uint)));
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 
@@ -85,7 +86,7 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
         for (int place = 0; place < Places; place++)
         {
             Span<uint> words = _rows.AsSpan((place * RowWords) + 1, RowWords - 1);
-            _resolved[place] = Resolve(graph, list[place], textures, words);
+            _resolved[place] = Resolve(frame, list[place], textures, words);
         }
 
         if (!graph.Upload(rows.Value, _rows.AsSpan()))
@@ -97,13 +98,13 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
     /// <summary>
     /// Whether any of <paramref name="list"/>'s effects is still loading, its material, its textures or its passes.
     /// </summary>
-    public bool IsLoading(RenderGraph graph, MaterialSlots list, TextureLookup textures)
+    public bool IsLoading(in RenderFrame frame, MaterialSlots list, TextureLookup textures)
     {
         Span<uint> words = stackalloc uint[RowWords - 1];
         bool isLoading = false;
         foreach (MaterialInstance slot in list)
         {
-            isLoading |= Resolve(graph, slot, textures, words).State == GpuState.Loading;
+            isLoading |= Resolve(frame, slot, textures, words).State == GpuState.Loading;
         }
 
         return isLoading;
@@ -129,7 +130,7 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
     /// <summary>
     /// Resolves the effect of <paramref name="slot"/>, and packs its params into <paramref name="words"/>.
     /// </summary>
-    private GpuEffect Resolve(RenderGraph graph, in MaterialInstance slot, TextureLookup textures, Span<uint> words)
+    private GpuEffect Resolve(in RenderFrame frame, in MaterialInstance slot, TextureLookup textures, Span<uint> words)
     {
         if (slot.Handle == Handle<Material>.None)
             return new GpuEffect(0, GpuState.Failed, default, default, default);
@@ -141,7 +142,7 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
         if (failure is not null)
         {
             string path = assets.GetPath(slot.Handle) ?? $"id {slot.Handle.Id}";
-            graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", $"Material {path} failed: {failure}.");
+            frame.Fail(RenderFailure.PostEffect, "An effect is not drawn", $"Material {path} failed: {failure}.");
 
             return new GpuEffect(slot.Handle.Id, GpuState.Failed, default, default, default);
         }
@@ -151,8 +152,8 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
 
         ShaderEntry apply = GetSpecialised(_applyShader, layout.Shader);
         ShaderEntry level = GetSpecialised(_levelShader, layout.Shader);
-        GpuState applied = graph.GetState(apply);
-        GpuState levels = layout.Needs.Levels == 0 ? GpuState.Ready : graph.GetState(level);
+        GpuState applied = gpu.GetState(apply);
+        GpuState levels = layout.Needs.Levels == 0 ? GpuState.Ready : gpu.GetState(level);
 
         return new GpuEffect(slot.Handle.Id, applied == GpuState.Ready ? levels : applied, apply, level, layout.Needs);
     }

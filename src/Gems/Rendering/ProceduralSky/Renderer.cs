@@ -5,7 +5,6 @@ using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -42,6 +41,8 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
 
     private readonly IEcs _ecs;
 
+    private readonly IGraphicsApi _gpu;
+
     private readonly Mailbox<EcsSnapshot<Sky>> _skies = new();
 
     private readonly ShaderEntry _transmittanceShader;
@@ -55,9 +56,10 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
     /// </summary>
     private readonly ImmutableArray<ShaderTypeArgument> _skyType;
 
-    internal Renderer(AssetManager assets, IEcs ecs)
+    internal Renderer(AssetManager assets, IEcs ecs, IGraphicsApi gpu)
     {
         _ecs = ecs;
+        _gpu = gpu;
         _transmittanceShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyTransmittance");
         _multiScatteringShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyMultiScattering");
         _viewShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyView");
@@ -71,25 +73,25 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
     /// The sky's shader type and the view's tables, the tables none while no entity has a sky, the shaders build, or
     /// the tables are not made. With none, the open sky lights the world.
     /// </returns>
-    public SkyTables? Render(in Frame frame, RenderGraph graph, in SkyInput input)
+    public SkyTables? Render(in RenderFrame frame, RenderGraph graph, in SkyInput input)
     {
         SkyTables none = new(_skyType, GpuTexture.None, GpuTexture.None, GpuTexture.None);
         if (_skies.TakeNewest() is not { Count: > 0 })
             return none;
 
-        GpuState shaders = graph.GetState(_transmittanceShader, _multiScatteringShader, _viewShader);
+        GpuState shaders = _gpu.GetState(_transmittanceShader, _multiScatteringShader, _viewShader);
         if (shaders == GpuState.Failed)
-            graph.Fail(RenderFailure.Sky, "Sky is not drawn", "a shader of the sky was not built.");
+            frame.Fail(RenderFailure.Sky, "Sky is not drawn", "a shader of the sky was not built.");
 
         if (shaders != GpuState.Ready)
             return none;
 
-        Result<GpuTexture> transmittance = graph.Texture(_transmittanceTable);
-        Result<GpuTexture> multiScattering = graph.Texture(_multiScatteringTable);
-        Result<GpuTexture> view = graph.Texture(_viewTable);
+        Result<GpuTexture> transmittance = _gpu.GetTexture(_transmittanceTable, frame.View);
+        Result<GpuTexture> multiScattering = _gpu.GetTexture(_multiScatteringTable, frame.View);
+        Result<GpuTexture> view = _gpu.GetTexture(_viewTable, frame.View);
         if (Result.FindFailure(transmittance, multiScattering, view) is { Ok: false } failed)
         {
-            graph.Fail(RenderFailure.Resource, "Sky is not drawn", failed.Error);
+            frame.Fail(RenderFailure.Resource, "Sky is not drawn", failed.Error);
 
             return none;
         }
@@ -131,9 +133,9 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
     /// Asks for every shader of the sky each frame, with or without a sky, so each is built or failed before a domain
     /// shows.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
+    public void Render(in RenderFrame frame, RenderGraph graph)
     {
-        if (!graph.IsAnyLoading(_transmittanceShader, _multiScatteringShader, _viewShader))
+        if (!_gpu.IsAnyLoading(_transmittanceShader, _multiScatteringShader, _viewShader))
             _built.TrySetResult();
     }
 

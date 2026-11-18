@@ -22,7 +22,7 @@ internal readonly record struct DenoiserTextures(
 
 /// <summary>
 /// Denoises the traced diffuse light with NVIDIA's NRD, RELAX_DIFFUSE: its passes, with NRD's own SPIR-V, run as
-/// bound shaders over the textures of its pools, which the graph keeps.
+/// bound shaders over the textures of its pools, which the GPU provider keeps.
 /// </summary>
 /// <remarks>
 /// One for each view: its NRD instance and last frame's matrices are the view's own.
@@ -142,14 +142,22 @@ internal sealed unsafe class Denoiser : IDisposable
     /// <summary>
     /// Gets the view's input and output textures at the traced size.
     /// </summary>
-    public static Result<DenoiserTextures> Prepare(in GIView view)
+    public static Result<DenoiserTextures> Prepare(IGraphicsApi gpu, in GIView view)
     {
-        RenderGraph graph = view.Graph;
-        Result<GpuTexture> motion = graph.Texture(view.GetTraced("NRD motion", GpuFormat.R16G16Sfloat));
-        Result<GpuTexture> normal = graph.Texture(view.GetTraced("NRD normal", GpuFormat.A2B10G10R10Unorm));
-        Result<GpuTexture> viewZ = graph.Texture(view.GetTraced("NRD view depth", GpuFormat.R32Sfloat));
-        Result<GpuTexture> radiance = graph.Texture(view.GetTraced("NRD radiance", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> output = graph.Texture(view.GetTraced("NRD output", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> motion = gpu.GetTexture(view.GetTraced("NRD motion", GpuFormat.R16G16Sfloat), view.Index);
+        Result<GpuTexture> normal = gpu.GetTexture(
+            view.GetTraced("NRD normal", GpuFormat.A2B10G10R10Unorm),
+            view.Index
+        );
+        Result<GpuTexture> viewZ = gpu.GetTexture(view.GetTraced("NRD view depth", GpuFormat.R32Sfloat), view.Index);
+        Result<GpuTexture> radiance = gpu.GetTexture(
+            view.GetTraced("NRD radiance", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
+        Result<GpuTexture> output = gpu.GetTexture(
+            view.GetTraced("NRD output", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
         if (Result.FindFailure(motion, normal, viewZ, radiance, output) is { Ok: false } failed)
             return Result.Failure(failed.Error);
 
@@ -227,10 +235,10 @@ internal sealed unsafe class Denoiser : IDisposable
 
         Nrd.InstanceDesc* desc = Nrd.NRD.GetInstanceDesc(_instance);
         Nrd.LibraryDesc* library = Nrd.NRD.GetLibraryDesc();
-        Result<GpuSampler> nearest = graph.Sampler(
+        Result<GpuSampler> nearest = _gpu.GetSampler(
             new SamplerDescription { Filter = TextureFilter.Nearest, Wrap = TextureWrap.Clamp }
         );
-        Result<GpuSampler> linear = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
+        Result<GpuSampler> linear = _gpu.GetSampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         if (Result.FindFailure(nearest, linear) is { Ok: false } noSampler)
             return Result.Failure(noSampler.Error);
 
@@ -323,14 +331,16 @@ internal sealed unsafe class Denoiser : IDisposable
                 Nrd.ResourceType.IN_DIFF_RADIANCE_HITDIST => Result.Success(textures.Radiance),
                 Nrd.ResourceType.OUT_DIFF_RADIANCE_HITDIST => Result.Success(textures.Output),
                 Nrd.ResourceType.TRANSIENT_POOL => GetPooled(
-                    graph,
+                    _gpu,
+                    view.Index,
                     view.TracedSize,
                     "NRD transient",
                     desc->transientPool[resource.indexInPool],
                     resource.indexInPool
                 ),
                 Nrd.ResourceType.PERMANENT_POOL => GetPooled(
-                    graph,
+                    _gpu,
+                    view.Index,
                     view.TracedSize,
                     "NRD permanent",
                     desc->permanentPool[resource.indexInPool],
@@ -341,7 +351,8 @@ internal sealed unsafe class Denoiser : IDisposable
     }
 
     private static Result<GpuTexture> GetPooled(
-        RenderGraph graph,
+        IGraphicsApi gpu,
+        int view,
         (int Width, int Height) size,
         string pool,
         Nrd.TextureDesc texture,
@@ -365,8 +376,9 @@ internal sealed unsafe class Denoiser : IDisposable
         int down = Math.Max((int)texture.downsampleFactor, 1);
         (int width, int height) = size;
 
-        return graph.Texture(
-            new TextureDescription($"{pool} {index}", (width + down - 1) / down, (height + down - 1) / down, format)
+        return gpu.GetTexture(
+            new TextureDescription($"{pool} {index}", (width + down - 1) / down, (height + down - 1) / down, format),
+            view
         );
     }
 

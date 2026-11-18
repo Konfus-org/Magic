@@ -29,9 +29,17 @@ internal sealed class TracedDiffuse(AssetManager assets)
     /// <summary>
     /// Asks for the trace's texture at the traced size, beside NRD's inputs.
     /// </summary>
-    public static Result<TracedDiffuseConstants> Prepare(in GIView view, in DenoiserTextures nrd, bool hasHistory)
+    public static Result<TracedDiffuseConstants> Prepare(
+        IGraphicsApi gpu,
+        in GIView view,
+        in DenoiserTextures nrd,
+        bool hasHistory
+    )
     {
-        Result<GpuTexture> traced = view.Graph.Texture(view.GetTraced("Traced diffuse", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> traced = gpu.GetTexture(
+            view.GetTraced("Traced diffuse", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
         if (!traced.Ok)
             return Result.Failure(traced.Error);
 

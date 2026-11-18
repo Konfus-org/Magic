@@ -18,9 +18,14 @@ namespace Magic.ClusteredGeometry;
 /// clusters, the impostor table and its atlases, and copied up in the frame it arrives. The pools grow to hold it. A
 /// model that leaves its row gives its ranges back to the free lists, and the GPU provider frees its atlases once no
 /// frame asks for them. A row is empty, and its instances draw nothing, until its model arrives. The pools and the
-/// atlases are asked of the graph every frame, so the GPU provider keeps what they hold.
+/// atlases are asked for every frame, so the GPU provider keeps what they hold.
 /// </remarks>
-internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManager assets, Threads threads)
+internal sealed class ClusterResources(
+    ClusterPreprocessor clusters,
+    AssetManager assets,
+    Threads threads,
+    IGraphicsApi gpu
+)
 {
     private const int ImpostorCapacity = 1024;
 
@@ -97,10 +102,10 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 
         // The GPU table is as long as the row list's capacity, which doubles as rows come and never shrinks, so it is
         // not made again each time a model arrives or leaves.
-        Result<GpuBuffer> table = graph.Buffer(
+        Result<GpuBuffer> table = gpu.GetBuffer(
             new("Cluster model table", (long)_rows.Capacity * GpuClusterModel.Bytes)
         );
-        Result<GpuBuffer> impostors = graph.Buffer(
+        Result<GpuBuffer> impostors = gpu.GetBuffer(
             new("Impostor table", (long)ImpostorCapacity * GpuImpostor.RowBytes)
         );
         if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
@@ -159,9 +164,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 
         // Asked for once the ranges are taken and before anything is copied into them, as a pool that grew is a new
         // buffer, which the GPU provider fills with what the old one held.
-        Result<GpuBuffer> vertices = _vertices.GetBuffer(graph);
-        Result<GpuBuffer> indices = _indices.GetBuffer(graph);
-        Result<GpuBuffer> clusters = _clusters.GetBuffer(graph);
+        Result<GpuBuffer> vertices = _vertices.GetBuffer(gpu);
+        Result<GpuBuffer> indices = _indices.GetBuffer(gpu);
+        Result<GpuBuffer> clusters = _clusters.GetBuffer(gpu);
         if (Result.FindFailure(vertices, indices, clusters) is { Ok: false } failed)
             return Result.Failure(failed.Error);
 
@@ -175,7 +180,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
                 _placedModels.RemoveAt(i);
         }
 
-        // Every resident impostor's atlases, asked of the graph, so the GPU provider keeps them and a pass that samples
+        // Every resident impostor's atlases, asked for each frame, so the GPU provider keeps them and a pass that samples
         // them names them in its reads.
         ImmutableArray<GpuResource>.Builder atlases = ImmutableArray.CreateBuilder<GpuResource>();
         foreach (Row row in _rows)
@@ -183,10 +188,10 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             if (row.ImpostorDescription is not { } atlas || row.ImpostorUvDescription is not { } uvAtlas)
                 continue;
 
-            if (graph.Texture(atlas) is { Ok: true } surface)
+            if (gpu.GetTexture(atlas) is { Ok: true } surface)
                 atlases.Add(surface.Value);
 
-            if (graph.Texture(uvAtlas) is { Ok: true } uvs)
+            if (gpu.GetTexture(uvAtlas) is { Ok: true } uvs)
                 atlases.Add(uvs.Value);
         }
 
@@ -339,8 +344,8 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     {
         TextureDescription atlasDescription = GetAtlasDescription($"{name} impostor", GpuFormat.R16G16B16A16Sfloat);
         TextureDescription uvDescription = GetAtlasDescription($"{name} impostor uv", GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> atlas = graph.Texture(atlasDescription);
-        Result<GpuTexture> uvAtlas = graph.Texture(uvDescription);
+        Result<GpuTexture> atlas = gpu.GetTexture(atlasDescription);
+        Result<GpuTexture> uvAtlas = gpu.GetTexture(uvDescription);
         if (Result.FindFailure(atlas, uvAtlas) is { Ok: false } failed)
         {
             Log.Warn($"{atlasDescription.Name} is not drawn: {failed.Error}");

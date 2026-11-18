@@ -7,7 +7,6 @@ using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.AccelerationStructures;
@@ -53,6 +52,8 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
 
     private readonly AssetManager _assets;
 
+    private readonly IGraphicsApi _gpu;
+
     private readonly ShaderEntry _averageShader;
 
     /// <summary>
@@ -84,9 +85,10 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
     /// </remarks>
     private (long Version, int Count, (Vector3 Min, Vector3 Max) Box) _built;
 
-    internal Renderer(AssetManager assets)
+    internal Renderer(AssetManager assets, IGraphicsApi gpu)
     {
         _assets = assets;
+        _gpu = gpu;
         _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
     }
 
@@ -96,9 +98,9 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
     /// <returns>
     /// The world as rays see it; none on a GPU that doesn't trace rays, or while what it is built into is not made.
     /// </returns>
-    public TracedWorld? Render(in Frame frame, RenderGraph graph, in AccelerationStructuresInput input)
+    public TracedWorld? Render(in RenderFrame frame, RenderGraph graph, in AccelerationStructuresInput input)
     {
-        if (!graph.Features.HasRayQuery)
+        if (!_gpu.Features.HasRayQuery)
             return null;
 
         GpuWorld world = input.World;
@@ -152,7 +154,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
 
             if (row.Description is { } description)
             {
-                Result<GpuAcceleration> structure = graph.Acceleration(description);
+                Result<GpuAcceleration> structure = _gpu.GetAcceleration(description);
                 if (!structure.Ok && row.Structure.IsNone)
                 {
                     Log.Warn($"{description.Name} is not made, so rays pass through its model: {structure.Error}");
@@ -225,7 +227,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
         for (int index = 0; index < _withEmptySlots.Count; index++)
         {
             EmptySlotsStructure held = _withEmptySlots[index];
-            Result<GpuAcceleration> structure = graph.Acceleration(held.Description);
+            Result<GpuAcceleration> structure = _gpu.GetAcceleration(held.Description);
             if (!structure.Ok || structure.Value == held.Structure)
                 continue;
 
@@ -238,14 +240,14 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
 
         // The structure over the world's instances and its instances asked for every frame, so the structure built last
         // stays, and the hit materials table with a row for each of the material table's.
-        Result<GpuBuffer> hitMaterials = graph.Buffer(
+        Result<GpuBuffer> hitMaterials = _gpu.GetBuffer(
             new("Hit materials", (long)drawn.MaterialCapacity * HitMaterialBytes)
         );
-        Result<GpuBuffer> instances = graph.Buffer(
+        Result<GpuBuffer> instances = _gpu.GetBuffer(
             new("Acceleration instances", (long)world.InstanceCapacity * GpuAccelerationInstance.Bytes)
         );
         Result<GpuAcceleration> topLevel = instances.Ok
-            ? graph.Acceleration(
+            ? _gpu.GetAcceleration(
                 new TopLevelDescription
                 {
                     MaxInstances = world.InstanceCapacity,
@@ -256,7 +258,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
             : Result.Failure(instances.Error);
         if (Result.FindFailure(hitMaterials, instances, topLevel) is { Ok: false } failed)
         {
-            graph.Fail(RenderFailure.Resource, "Ray structure is not made", failed.Error);
+            frame.Fail(RenderFailure.Resource, "Ray structure is not made", failed.Error);
 
             return null;
         }

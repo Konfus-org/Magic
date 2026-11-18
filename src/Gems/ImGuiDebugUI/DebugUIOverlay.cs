@@ -15,7 +15,7 @@ namespace Magic.ImGuiDebugUI;
 /// Draws the newest ImGui frame that the UI published over the window's image, in the overlay layer. Render thread.
 /// </summary>
 /// <remarks>
-/// It draws the same frame again until a newer one comes. It asks the graph for ImGui's textures every frame while the
+/// It draws the same frame again until a newer one comes. It asks the GPU provider for ImGui's textures every frame while the
 /// UI holds them.
 /// </remarks>
 internal sealed class DebugUIOverlay
@@ -23,6 +23,7 @@ internal sealed class DebugUIOverlay
     private const int MinBufferBytes = 16 * 1024;
 
     private readonly Mailbox<DebugUIFrame> _frames;
+    private readonly IGraphicsApi _gpu;
     private readonly ChannelReader<DebugUITextureChange> _textureChanges;
     private readonly DrawShaders _shaders;
 
@@ -33,10 +34,12 @@ internal sealed class DebugUIOverlay
 
     public DebugUIOverlay(
         AssetManager assets,
+        IGraphicsApi gpu,
         Mailbox<DebugUIFrame> frames,
         ChannelReader<DebugUITextureChange> textureChanges
     )
     {
+        _gpu = gpu;
         _frames = frames;
         _textureChanges = textureChanges;
         _shaders = new DrawShaders(
@@ -64,21 +67,23 @@ internal sealed class DebugUIOverlay
         // The texture changes are taken and the textures asked for whether or not there is a window to draw over, so
         // none wait for good and none are let go of.
         TakeTextureChanges(frame.Index, graph);
-        AskTextures(graph);
-        GpuTexture target = graph.WindowTarget;
+        AskTextures();
+        GpuTexture target = _gpu.WindowTarget;
         if (target.IsNone || frame.Indices.Count == 0)
             return;
 
         ReadOnlySpan<ImDrawVert_t> vertexRows = CollectionsMarshal.AsSpan(frame.Vertices);
         ReadOnlySpan<uint> indexRows = CollectionsMarshal.AsSpan(frame.Indices);
-        Result<GpuBuffer> vertices = graph.Buffer(
+        Result<GpuBuffer> vertices = _gpu.GetBuffer(
             GetDescription("Debug UI vertices", MemoryMarshal.AsBytes(vertexRows).Length, BufferUsages.Storage)
         );
-        Result<GpuBuffer> indices = graph.Buffer(
+        Result<GpuBuffer> indices = _gpu.GetBuffer(
             GetDescription("Debug UI indices", indexRows.Length * sizeof(uint), BufferUsages.Index)
         );
-        Result<GpuBuffer> constants = graph.Buffer(new BufferDescription("Debug UI constants", DebugUIConstants.Bytes));
-        Result<GpuSampler> sampler = graph.Sampler(
+        Result<GpuBuffer> constants = _gpu.GetBuffer(
+            new BufferDescription("Debug UI constants", DebugUIConstants.Bytes)
+        );
+        Result<GpuSampler> sampler = _gpu.GetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         Result made = Result.FindFailure(vertices, indices, constants, sampler);
@@ -89,7 +94,7 @@ internal sealed class DebugUIOverlay
             return;
         }
 
-        TextureDescription description = graph.GetDescription(target);
+        TextureDescription description = _gpu.GetDescription(target);
         // A frame whose rows were not staged draws no UI; the next frame sends its own.
         bool isSent =
             graph.Upload(vertices.Value, vertexRows)
@@ -120,11 +125,11 @@ internal sealed class DebugUIOverlay
     /// <summary>
     /// Asks for every texture that the UI holds, so the GPU provider keeps it and hands back the same texture.
     /// </summary>
-    private void AskTextures(RenderGraph graph)
+    private void AskTextures()
     {
         foreach ((TextureDescription description, GpuTexture _) in _textures.Values)
         {
-            _ = graph.Texture(description);
+            _ = _gpu.GetTexture(description);
         }
     }
 
@@ -162,7 +167,7 @@ internal sealed class DebugUIOverlay
             GpuFormat.R8G8B8A8Unorm,
             TextureUsages.Sampled | TextureUsages.CopyDestination
         );
-        Result<GpuTexture> made = graph.Texture(description);
+        Result<GpuTexture> made = _gpu.GetTexture(description);
         if (!made.Ok)
         {
             Log.Error($"A debug UI texture was not made: {made.Error}");

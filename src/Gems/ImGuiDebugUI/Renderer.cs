@@ -1,7 +1,6 @@
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using static Magic.ImGuiDebugUI.ImGui;
 using static Magic.ImGuiDebugUI.ImTextureStatus;
@@ -32,12 +31,13 @@ public sealed class Renderer : IRender
     /// </summary>
     private ulong _lastTextureId;
 
-    internal Renderer(AssetManager assets) => _overlay = new DebugUIOverlay(assets, _frames, _textureChanges.Reader);
+    internal Renderer(AssetManager assets, IGraphicsApi gpu) =>
+        _overlay = new DebugUIOverlay(assets, gpu, _frames, _textureChanges.Reader);
 
     /// <summary>
     /// Records the newest frame that ImGui ended, over the window's image.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph) => _overlay.Record(graph);
+    public void Render(in RenderFrame frame, RenderGraph graph) => _overlay.Record(graph);
 
     /// <summary>
     /// Publishes a copy of the frame that ImGui just ended in <paramref name="frame"/> for the overlay. Game thread.

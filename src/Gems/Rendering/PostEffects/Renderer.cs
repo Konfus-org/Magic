@@ -48,6 +48,8 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
 
     private readonly Threads _threads;
 
+    private readonly IGraphicsApi _gpu;
+
     private readonly Mailbox<EcsSnapshot<PostProcessing>> _processing = new();
 
     /// <summary>
@@ -89,16 +91,18 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
         IShaderCompiler shaders,
         AssetManager assets,
         IEcs ecs,
-        Threads threads
+        Threads threads,
+        IGraphicsApi gpu
     )
     {
         _settings = settings;
+        _gpu = gpu;
         _ecs = ecs;
         _assets = assets;
         _threads = threads;
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
-        _effects = new Effects(assets, shaders, threads);
+        _effects = new Effects(assets, shaders, threads, gpu);
         _made = new PictureEffects(false, Record);
     }
 
@@ -132,7 +136,7 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
     /// <returns>
     /// The frame's effects, jittered while one that is ready asks for it; none while their rows are not made.
     /// </returns>
-    public PictureEffects? Render(in Frame frame, RenderGraph graph, in PostInput input)
+    public PictureEffects? Render(in RenderFrame frame, RenderGraph graph, in PostInput input)
     {
         while (_reloaded.Reader.TryRead(out ulong asset))
         {
@@ -140,7 +144,7 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
         }
 
         TextureLookup textures = input.World.GetTexture;
-        if (_preparing is { } preparing && !_effects.IsLoading(graph, preparing.Effects, textures))
+        if (_preparing is { } preparing && !_effects.IsLoading(frame, preparing.Effects, textures))
             EndPreparing();
 
         // The first post processing's effects, or the engine's, exposed by the exposure compensation; each whose
@@ -164,10 +168,15 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
                 post[place] = default;
         }
 
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post, textures);
+        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
+            frame,
+            graph,
+            post,
+            textures
+        );
         if (!effects.Ok)
         {
-            graph.Fail(RenderFailure.PostEffect, "Effects are not drawn", effects.Error);
+            frame.Fail(RenderFailure.PostEffect, "Effects are not drawn", effects.Error);
             EndPreparing();
 
             return null;
@@ -202,23 +211,23 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
     /// <summary>
     /// Lets the loading domain show when the world's step is out, as the effects are then not resolved.
     /// </summary>
-    void IRender.Render(in Frame frame, RenderGraph graph)
+    void IRender.Render(in RenderFrame frame, RenderGraph graph)
     {
-        if (graph.IsMakerOut<GpuWorld>())
+        if (frame.IsUnavailable<GpuWorld>())
             EndPreparing();
     }
 
     /// <summary>
     /// Runs the frame's effects that are ready over the view's lit picture.
     /// </summary>
-    private void Record(RenderGraph graph, GpuView view, uint frameIndex)
+    private void Record(in RenderFrame frame, RenderGraph graph, GpuView view)
     {
-        while (_views.Count <= graph.View)
+        while (_views.Count <= frame.View)
         {
-            _views.Add(new PixelEffects());
+            _views.Add(new PixelEffects(_gpu));
         }
 
-        _views[graph.View].Record(graph, view, _resolved.Effects.Span, _resolved.Rows, frameIndex);
+        _views[frame.View].Record(frame, graph, view, _resolved.Effects.Span, _resolved.Rows);
     }
 
     private void EndPreparing()

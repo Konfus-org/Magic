@@ -11,4 +11,4 @@ namespace Magic.DeferredRendering;
 /// output is drawn, and shows the picture it returns in place of the output, stretched, which it shows when that is
 /// none. While one is made, the camera jitters.
 /// </remarks>
-public readonly record struct Upscaling(Func<RenderGraph, GpuView, GpuTexture> Record);
+public readonly record struct Upscaling(Func<RenderFrame, RenderGraph, GpuView, GpuTexture> Record);

@@ -19,6 +19,7 @@ public static class TracedBlend
     /// The other texture is the history, which holds the view as <paramref name="hasHistory"/> says.
     /// </remarks>
     public static Result<TracedBlendConstants> Prepare(
+        IGraphicsApi gpu,
         in GIView view,
         ReadOnlySpan<string> names,
         uint frameIndex,
@@ -26,9 +27,13 @@ public static class TracedBlend
     )
     {
         int written = (int)(frameIndex % 2);
-        Result<GpuTexture> light = view.Graph.Texture(view.GetTraced(names[written], GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> history = view.Graph.Texture(
-            view.GetTraced(names[1 - written], GpuFormat.R16G16B16A16Sfloat)
+        Result<GpuTexture> light = gpu.GetTexture(
+            view.GetTraced(names[written], GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
+        Result<GpuTexture> history = gpu.GetTexture(
+            view.GetTraced(names[1 - written], GpuFormat.R16G16B16A16Sfloat),
+            view.Index
         );
         if (Result.FindFailure(light, history) is { Ok: false } failed)
             return Result.Failure(failed.Error);

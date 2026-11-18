@@ -14,7 +14,8 @@ public sealed class EntryPoint(
     IShaderCompiler shaders,
     AssetManager assets,
     IEcs ecs,
-    Threads threads
+    Threads threads,
+    IGraphicsApi gpu
 ) : IGem
 {
     /// <summary>
@@ -22,7 +23,7 @@ public sealed class EntryPoint(
     /// </summary>
     public PostEffectsSettings Settings { get; } = settings;
 
-    public Renderer Renderer { get; } = new(settings, shaders, assets, ecs, threads);
+    public Renderer Renderer { get; } = new(settings, shaders, assets, ecs, threads, gpu);
 
     public void LateUpdate(in Frame frame) => Renderer.PublishPostProcessing(frame);
 }

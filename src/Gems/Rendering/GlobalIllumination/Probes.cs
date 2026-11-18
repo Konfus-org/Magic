@@ -18,7 +18,7 @@ namespace Magic.GlobalIllumination;
 /// moving grid keeps its cell, and starts afresh in a new one. What the probes hold carries from frame to frame, from
 /// the first update on.
 /// </remarks>
-internal sealed class Probes(AssetManager assets)
+internal sealed class Probes(AssetManager assets, IGraphicsApi gpu)
 {
     /// <summary>
     /// The most probes of a cascade along x and z, and up y: the depth texture lays them out in a row of tiles along x
@@ -100,7 +100,7 @@ internal sealed class Probes(AssetManager assets)
     }
 
     /// <summary>
-    /// Asks for the buffers and depth texture of the grid of the graph's view, each cascade at <paramref name="size"/>,
+    /// Asks for the buffers and depth texture of the grid of the frame's view, each cascade at <paramref name="size"/>,
     /// with the probes of the finest <paramref name="spacing"/> metres apart.
     /// </summary>
     /// <remarks>
@@ -108,6 +108,7 @@ internal sealed class Probes(AssetManager assets)
     /// while they hold nothing or the size or spacing changed.
     /// </remarks>
     public Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> Prepare(
+        in RenderFrame frame,
         RenderGraph graph,
         bool hasHistory,
         (int Across, int Up) size,
@@ -118,33 +119,37 @@ internal sealed class Probes(AssetManager assets)
         spacing = MathF.Max(spacing, 0.1f);
 
         // What the view's grid keeps from frame to frame, by the view's number.
-        while (_grids.Count <= graph.View)
+        while (_grids.Count <= frame.View)
         {
             _grids.Add(default);
         }
 
         (int across, int up) = size;
-        hasHistory &= _grids[graph.View] == (across, up, spacing);
-        _grids[graph.View] = (across, up, spacing);
+        hasHistory &= _grids[frame.View] == (across, up, spacing);
+        _grids[frame.View] = (across, up, spacing);
         long cells = (long)across * up * across;
         long probes = cells * Cascades;
         // PROTO: the light grid's cells, a few for each probe of the finest cascade, follow the probes.
-        Result<GpuBuffer> probeTable = graph.Buffer(
-            new("Probes", (probes * ProbeBytes) + (cells * LightCellsPerProbe * LightCellBytes))
+        Result<GpuBuffer> probeTable = gpu.GetBuffer(
+            new("Probes", (probes * ProbeBytes) + (cells * LightCellsPerProbe * LightCellBytes)),
+            frame.View
         );
-        Result<GpuBuffer> rays = graph.Buffer(new("Probe rays", RayBudget * RayBytes));
-        Result<GpuBuffer> list = graph.Buffer(new("Probe ray list", RayBudget * 4));
-        Result<GpuBuffer> arguments = graph.Buffer(
-            new("Probe ray arguments", 16, BufferUsages.Storage | BufferUsages.Indirect)
+        Result<GpuBuffer> rays = gpu.GetBuffer(new("Probe rays", RayBudget * RayBytes), frame.View);
+        Result<GpuBuffer> list = gpu.GetBuffer(new("Probe ray list", RayBudget * 4), frame.View);
+        Result<GpuBuffer> arguments = gpu.GetBuffer(
+            new("Probe ray arguments", 16, BufferUsages.Storage | BufferUsages.Indirect),
+            frame.View
         );
-        Result<GpuBuffer> counts = graph.Buffer(new("Probe ray counts", ((probes * 2) + 1) * 4));
-        Result<GpuBuffer> variance = graph.Buffer(
-            new("Probe variance", probes * IrradianceTexels * IrradianceTexels * VarianceBytes)
+        Result<GpuBuffer> counts = gpu.GetBuffer(new("Probe ray counts", ((probes * 2) + 1) * 4), frame.View);
+        Result<GpuBuffer> variance = gpu.GetBuffer(
+            new("Probe variance", probes * IrradianceTexels * IrradianceTexels * VarianceBytes),
+            frame.View
         );
-        Result<GpuTexture> depth = graph.Texture(
-            new("Probe depth", DepthTile * across * up, DepthTile * across * Cascades, GpuFormat.R16G16Sfloat)
+        Result<GpuTexture> depth = gpu.GetTexture(
+            new("Probe depth", DepthTile * across * up, DepthTile * across * Cascades, GpuFormat.R16G16Sfloat),
+            frame.View
         );
-        Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
+        Result<GpuSampler> sampler = gpu.GetSampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         Result asked = Result.FindFailure(probeTable, rays, list, arguments, counts, variance, depth, sampler);
         if (!asked.Ok)
             return Result.Failure(asked.Error);

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Projects;
 using Magic.Utils;
@@ -46,6 +47,23 @@ internal sealed class Rendering
     /// </summary>
     private Func<RenderViews?> _getViews = static () => null;
 
+    private List<(RenderFailure Kind, string What)> _failures = [];
+
+    private List<(RenderFailure Kind, string What)> _failedBefore = [];
+
+    /// <summary>
+    /// What failed in this frame, each one time, in the order first told to <see cref="Fail"/>.
+    /// </summary>
+    public ReadOnlySpan<(RenderFailure Kind, string What)> Failures => CollectionsMarshal.AsSpan(_failures);
+
+    /// <summary>
+    /// How many times <see cref="Fail"/> was told in this frame, repeats included.
+    /// </summary>
+    /// <remarks>
+    /// It shows that a step failed when its failure repeats an earlier step's.
+    /// </remarks>
+    public int ToldCount { get; private set; }
+
     /// <summary>
     /// Adds a step of the frame for each render form that <paramref name="part"/> implements, until the subscription
     /// ends.
@@ -83,9 +101,24 @@ internal sealed class Rendering
 
     /// <summary>
     /// Whether no gem makes <paramref name="type"/>, or its step is out this frame. See
-    /// <see cref="RenderGraph.IsMakerOut{T}"/>.
+    /// <see cref="RenderFrame.IsUnavailable{T}"/>.
     /// </summary>
-    public bool IsMakerOut(Type type) => !_makers.TryGetValue(type, out Maker maker) || maker.Step.IsOut;
+    public bool IsUnavailable(Type type) => !_makers.TryGetValue(type, out Maker maker) || maker.Step.IsOut;
+
+    /// <summary>
+    /// Tells that <paramref name="what"/> failed in this frame. See <see cref="RenderFrame.Fail"/>.
+    /// </summary>
+    public void Fail(RenderFailure kind, string what, string reason)
+    {
+        ToldCount++;
+        (RenderFailure, string) failure = (kind, what);
+        if (_failures.Contains(failure))
+            return;
+
+        _failures.Add(failure);
+        if (!_failedBefore.Contains(failure))
+            Log.Error($"{kind} failed: {what}. {reason}");
+    }
 
     /// <summary>
     /// Records each gem's steps of the frame in order into <paramref name="graph"/>, and times each gem one time.
@@ -103,11 +136,15 @@ internal sealed class Rendering
     /// </remarks>
     public void Pump(in Frame frame, RenderGraph graph)
     {
-        graph.StartFailures();
+        // The last frame's failures are kept, to find which of this frame's are new.
+        (_failedBefore, _failures) = (_failures, _failedBefore);
+        _failures.Clear();
+        ToldCount = 0;
+        RenderFrame once = new(frame, 0, this);
         (int first, int count) = _viewSteps.GetOffsetAndLength(_steps.Count);
         for (int i = 0; i < first; i++)
         {
-            Run(_steps[i], _steps[i].Next, frame, graph);
+            Run(_steps[i], _steps[i].Next, once, graph);
         }
 
         // One view unless the step that makes the views, which ran before them, tells of more.
@@ -117,19 +154,18 @@ internal sealed class Rendering
             if (view > 0)
                 graph.OrderPasses();
 
-            graph.View = view;
+            RenderFrame ofView = new(frame, view, this);
             // A gem whose last step is one of a view is timed after the last view, for all of them.
             for (int i = first; i < first + count; i++)
             {
                 Step step = _steps[i];
-                Run(step, step.Next ?? (view < views - 1 ? step : null), frame, graph);
+                Run(step, step.Next ?? (view < views - 1 ? step : null), ofView, graph);
             }
         }
 
-        graph.View = 0;
         for (int i = first + count; i < _steps.Count; i++)
         {
-            Run(_steps[i], _steps[i].Next, frame, graph);
+            Run(_steps[i], _steps[i].Next, once, graph);
         }
     }
 
@@ -173,10 +209,10 @@ internal sealed class Rendering
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem throws, it is a failure of the frame and the gem leaves it; the others go on."
     )]
-    private static void Run(Step step, Step? timedBy, in Frame frame, RenderGraph graph)
+    private void Run(Step step, Step? timedBy, in RenderFrame frame, RenderGraph graph)
     {
         long start = Metrics.HookDurations.Start();
-        int told = graph.ToldCount;
+        int told = ToldCount;
         if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
         {
             try
@@ -198,9 +234,9 @@ internal sealed class Rendering
         // Tell the failure in each frame that the step is out. Fail logs it only when it is new.
         bool isSkipped = step.Missing is not null || step.RetrySec is not null;
         if (isSkipped)
-            graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
+            frame.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
 
-        step.IsOut = isSkipped || (!step.HasMade && graph.ToldCount > told);
+        step.IsOut = isSkipped || (!step.HasMade && ToldCount > told);
 
         // A gem with several steps is timed once a frame, by the last run of its last step, for the time of all of
         // them in every view.
@@ -371,7 +407,7 @@ internal sealed class Rendering
         /// <summary>
         /// Records the gem's passes when each input it must take was made this frame, and keeps what it made.
         /// </summary>
-        public abstract void Run(in Frame frame, RenderGraph graph);
+        public abstract void Run(in RenderFrame frame, RenderGraph graph);
 
         /// <summary>
         /// Builds, one time, how each frame takes its input from the outputs of <paramref name="makers"/>.
@@ -406,14 +442,15 @@ internal sealed class Rendering
         private readonly Renders _render = part switch
         {
             IRender<TInput, TOutput> both => both.Render,
-            IRenderFrom<TInput> from => (in Frame frame, RenderGraph graph, in TInput input) =>
+            IRenderFrom<TInput> from => (in RenderFrame frame, RenderGraph graph, in TInput input) =>
             {
                 from.Render(frame, graph, input);
 
                 return null;
             },
-            IRenderInto<TOutput> into => (in Frame frame, RenderGraph graph, in TInput _) => into.Render(frame, graph),
-            IRender plain => (in Frame frame, RenderGraph graph, in TInput _) =>
+            IRenderInto<TOutput> into => (in RenderFrame frame, RenderGraph graph, in TInput _) =>
+                into.Render(frame, graph),
+            IRender plain => (in RenderFrame frame, RenderGraph graph, in TInput _) =>
             {
                 plain.Render(frame, graph);
 
@@ -454,7 +491,7 @@ internal sealed class Rendering
                     ?? [],
             ];
 
-        public override void Run(in Frame frame, RenderGraph graph)
+        public override void Run(in RenderFrame frame, RenderGraph graph)
         {
             Made = null;
             if (_take() is { } input)
@@ -547,6 +584,6 @@ internal sealed class Rendering
         /// <summary>
         /// The gem's render form, called as <c>Render</c> of <see cref="IRender{TInput, TOutput}"/>.
         /// </summary>
-        private delegate TOutput? Renders(in Frame frame, RenderGraph graph, in TInput input);
+        private delegate TOutput? Renders(in RenderFrame frame, RenderGraph graph, in TInput input);
     }
 }

@@ -138,7 +138,7 @@ goes through the panes behind it. The pane reflects the light around it, and the
 A model that does not load draws as a flashing teal cube of one metre, with "Model failed" and its path. Other
 failures flash on the mesh of their entity ([Debugging](DEBUGGING.md)).
 
-- Each failure that a gem or Core gives to `RenderGraph.Fail` in a frame is one line of the banner. The banner shows
+- Each failure that a gem or Core gives to `RenderFrame.Fail` in a frame is one line of the banner. The banner shows
   eight lines. The last line counts the rest.
 - A failed post effect flashes a blue frame round the window, with its line at the bottom. The other effects run.
 - A failed sky flashes coral with "Sky failed". Failed clouds flash a green band with "Weather failed".
@@ -164,8 +164,9 @@ To measure the light against a path tracer, use the reference views ([Debugging]
   `GpuWorld.GetTexture`.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call. The call names what the pass reads and writes.
 - A step draws nothing until each shader entry point that it runs is built.
-- Each frame, a pass asks the graph for its textures and buffers by name and description. The same name and
-  description give the same resource, with what the last frame wrote in it.
+- Each frame, a step asks the GPU provider for its textures and buffers by name and description. The same name and
+  description give the same resource, with what the last frame wrote in it. For a resource that each view has of its
+  own, the step gives the view with the ask.
 - The tables and techniques of the renderer, which the other rendering gems import, are in the folders under its
   `Shaders/`.
 

@@ -6,7 +6,6 @@ using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -96,7 +95,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
         _gpu = gpu;
 
-        _probes = new Probes(assets);
+        _probes = new Probes(assets, gpu);
         _diffuse = new TracedDiffuse(assets);
         _openSky = SkyTables.GetOpenSky(assets);
         _shaders =
@@ -119,16 +118,16 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     }
 
     /// <summary>
-    /// Traces the indirect light of the graph's view and writes its row into the view's frame buffer.
+    /// Traces the indirect light of the frame's view and writes its row into the view's frame buffer.
     /// </summary>
     /// <returns>
     /// The view's indirect light, or none while it is off, the shaders build, what they read and write is not made, or
     /// rays see no instance. With none, the surfaces take the sky's light.
     /// </returns>
-    public IndirectLight? Render(in Frame frame, RenderGraph graph, in GlobalIlluminationInput input)
+    public IndirectLight? Render(in RenderFrame frame, RenderGraph graph, in GlobalIlluminationInput input)
     {
         // What the view keeps from frame to frame, by its number.
-        while (_views.Count <= graph.View)
+        while (_views.Count <= frame.View)
         {
             _views.Add(default);
             _denoisers.Add(new Denoiser(_gpu, _denoisers.Count > 0 ? _denoisers[0] : null));
@@ -139,7 +138,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         {
             _built.TrySetResult();
             _settling.End();
-            _views[graph.View] = default;
+            _views[frame.View] = default;
 
             return null;
         }
@@ -148,7 +147,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         // Otherwise the view is still loading, and the domain keeps waiting for the passes.
         if (input.View is not { } gpu)
         {
-            if (graph.IsMakerOut<GpuView>())
+            if (frame.IsUnavailable<GpuView>())
             {
                 _built.TrySetResult();
                 _settling.End();
@@ -163,10 +162,10 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (input.Traced is not { } traced)
         {
             _built.TrySetResult();
-            if (!graph.Features.HasRayQuery || graph.IsMakerOut<TracedWorld>())
+            if (!_gpu.Features.HasRayQuery || frame.IsUnavailable<TracedWorld>())
                 _settling.End();
 
-            _views[graph.View] = default;
+            _views[frame.View] = default;
 
             return null;
         }
@@ -174,8 +173,8 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
         // The traces on the sky's type and on the open sky are both built, as a domain's frames take either.
         ImmutableArray<ShaderTypeArgument> skyType = input.Sky?.SkyType ?? _openSky;
-        GpuState shaders = graph.GetState(_shaders.AsSpan());
-        GpuState skyShaders = graph.GetState(
+        GpuState shaders = _gpu.GetState(_shaders.AsSpan());
+        GpuState skyShaders = _gpu.GetState(
             _probes.TraceShader with
             {
                 TypeArguments = skyType,
@@ -194,7 +193,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (shaders == GpuState.Failed)
         {
             _settling.End();
-            graph.Fail(
+            frame.Fail(
                 RenderFailure.Shader,
                 "Indirect light is not traced",
                 "a shader of the indirect light was not built."
@@ -208,20 +207,20 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (traced.Structure.IsNone)
         {
             _settling.End();
-            _views[graph.View] = default;
+            _views[frame.View] = default;
 
             return null;
         }
 
-        Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
+        Result<GpuBuffer> constants = _gpu.GetBuffer(new("GI constants", Unsafe.SizeOf<GIConstants>()), frame.View);
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
 
         // A view that lost its history at the same size draws another world: its probes and history start afresh
         // at that world's first frame.
-        if (!gpu.HasHistory && _views[graph.View].Traced == tracedSize)
-            _views[graph.View] = default;
+        if (!gpu.HasHistory && _views[frame.View].Traced == tracedSize)
+            _views[frame.View] = default;
 
-        ((int Width, int Height)? lastTraced, int lastBlended) = _views[graph.View];
+        ((int Width, int Height)? lastTraced, int lastBlended) = _views[frame.View];
         bool hasHistory = lastTraced == tracedSize;
 
         // A new traced size starts the history afresh, but not the probes, which settle from where they are.
@@ -230,6 +229,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         bool isSettling = blended < settleFrames;
         GIView view = new(
             graph,
+            frame.View,
             gpu,
             constants.Value,
             tracedSize,
@@ -237,25 +237,30 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             SkyTables.GetSkyType(input.Sky, _openSky)
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
+            frame,
             graph,
             lastTraced is not null,
             (_settings.ProbesAcross, _settings.ProbesUp),
             _settings.ProbeSpacing
         );
-        Result<DenoiserTextures> nrd = Denoiser.Prepare(view);
+        Result<DenoiserTextures> nrd = Denoiser.Prepare(_gpu, view);
         Result<TracedDiffuseConstants> diffuse = nrd.Ok
-            ? TracedDiffuse.Prepare(view, nrd.Value, hasHistory)
+            ? TracedDiffuse.Prepare(_gpu, view, nrd.Value, hasHistory)
             : Result.Failure(nrd.Error);
         int written = (int)(frame.Index % 2);
-        Result<GpuTexture> depth = graph.Texture(view.GetTraced(GIView.DepthNames[written], GIView.DepthFormat));
-        Result<GpuTexture> depthHistory = graph.Texture(
-            view.GetTraced(GIView.DepthNames[1 - written], GIView.DepthFormat)
+        Result<GpuTexture> depth = _gpu.GetTexture(
+            view.GetTraced(GIView.DepthNames[written], GIView.DepthFormat),
+            frame.View
+        );
+        Result<GpuTexture> depthHistory = _gpu.GetTexture(
+            view.GetTraced(GIView.DepthNames[1 - written], GIView.DepthFormat),
+            frame.View
         );
         Result asked = Result.FindFailure(constants, probes, diffuse, depth, depthHistory);
         if (!asked.Ok)
         {
             _settling.End();
-            graph.Fail(RenderFailure.Resource, "Indirect light is not traced", asked.Error);
+            frame.Fail(RenderFailure.Resource, "Indirect light is not traced", asked.Error);
 
             return null;
         }
@@ -303,14 +308,14 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
         _probes.Record(view, grid, gi.Probes);
         _diffuse.RecordTrace(view, grid, gi);
-        Result denoised = _denoisers[graph.View]
+        Result denoised = _denoisers[frame.View]
             .Record(view, nrd.Value, frame.Index, (float)frame.AppDeltaSec, !hasHistory);
         if (!denoised.Ok)
-            graph.Fail(RenderFailure.Resource, "Indirect light is not denoised", denoised.Error);
+            frame.Fail(RenderFailure.Resource, "Indirect light is not denoised", denoised.Error);
 
         _diffuse.RecordSkyShare(view, gi);
-        _views[graph.View] = (tracedSize, blended);
-        if (graph.View == 0 && blended >= settleFrames)
+        _views[frame.View] = (tracedSize, blended);
+        if (frame.View == 0 && blended >= settleFrames)
             _settling.End();
 
         return new IndirectLight(nrd.Value.Output, gi.Depth, grid.Probes, grid.Depth);

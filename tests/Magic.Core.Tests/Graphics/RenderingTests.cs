@@ -111,21 +111,21 @@ public sealed class RenderingTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void IsMakerOutTellsOnlyWhenTheMakerFailedAndMadeNothing(bool fails)
+    public void IsUnavailableTellsOnlyWhenTheMakerFailedAndMadeNothing(bool fails)
     {
         Watch watch = new();
         Rendering rendering = Register(new Broken(fails), new Lost([]), watch);
-        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+        rendering.Pump(_frame, new RenderGraph());
 
         Assert.Equal(fails, watch.IsViewOut);
     }
 
     [Fact]
-    public void IsMakerOutTellsWhenTheMakersOnlyFailureAnEarlierPartAlreadyTold()
+    public void IsUnavailableTellsWhenTheMakersOnlyFailureAnEarlierPartAlreadyTold()
     {
         Watch watch = new();
         Rendering rendering = Register(new Dim(), new Echo(), watch);
-        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+        rendering.Pump(_frame, new RenderGraph());
 
         Assert.True(watch.IsViewOut);
     }
@@ -159,7 +159,7 @@ public sealed class RenderingTests
 
     private sealed class World(List<string> calls, View? made) : IRenderInto<View>
     {
-        public View? Render(in Frame frame, RenderGraph graph)
+        public View? Render(in RenderFrame frame, RenderGraph graph)
         {
             calls.Add(nameof(World));
 
@@ -169,7 +169,7 @@ public sealed class RenderingTests
 
     private sealed class Trace(List<string> calls) : IRender<TraceInput, Light>
     {
-        public Light? Render(in Frame frame, RenderGraph graph, in TraceInput input)
+        public Light? Render(in RenderFrame frame, RenderGraph graph, in TraceInput input)
         {
             calls.Add(nameof(Trace));
 
@@ -181,7 +181,7 @@ public sealed class RenderingTests
     {
         public ShadeInput? Taken { get; private set; }
 
-        public void Render(in Frame frame, RenderGraph graph, in ShadeInput input)
+        public void Render(in RenderFrame frame, RenderGraph graph, in ShadeInput input)
         {
             calls.Add(nameof(Shade));
             Taken = input;
@@ -190,20 +190,20 @@ public sealed class RenderingTests
 
     private sealed class Lost(List<string> calls) : IRenderFrom<EggInput>
     {
-        public void Render(in Frame frame, RenderGraph graph, in EggInput input) => calls.Add(nameof(Lost));
+        public void Render(in RenderFrame frame, RenderGraph graph, in EggInput input) => calls.Add(nameof(Lost));
     }
 
     private sealed class Overlay(List<string> calls) : IRender
     {
-        public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
+        public void Render(in RenderFrame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
     }
 
     private sealed class Broken(bool fails) : IRenderInto<View>
     {
-        public View? Render(in Frame frame, RenderGraph graph)
+        public View? Render(in RenderFrame frame, RenderGraph graph)
         {
             if (fails)
-                graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+                frame.Fail(RenderFailure.Pass, "View is not made", "it broke.");
 
             return null;
         }
@@ -211,9 +211,9 @@ public sealed class RenderingTests
 
     private sealed class Dim : IRenderInto<Light>
     {
-        public Light? Render(in Frame frame, RenderGraph graph)
+        public Light? Render(in RenderFrame frame, RenderGraph graph)
         {
-            graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+            frame.Fail(RenderFailure.Pass, "View is not made", "it broke.");
 
             return new Light(1);
         }
@@ -221,9 +221,9 @@ public sealed class RenderingTests
 
     private sealed class Echo : IRender<EggInput, View>
     {
-        public View? Render(in Frame frame, RenderGraph graph, in EggInput input)
+        public View? Render(in RenderFrame frame, RenderGraph graph, in EggInput input)
         {
-            graph.Fail(RenderFailure.Pass, "View is not made", "it broke again.");
+            frame.Fail(RenderFailure.Pass, "View is not made", "it broke again.");
 
             return null;
         }
@@ -233,21 +233,21 @@ public sealed class RenderingTests
     {
         public bool IsViewOut { get; private set; }
 
-        public void Render(in Frame frame, RenderGraph graph) => IsViewOut = graph.IsMakerOut<View>();
+        public void Render(in RenderFrame frame, RenderGraph graph) => IsViewOut = frame.IsUnavailable<View>();
     }
 
     private sealed class Sun : IRenderInto<(View, Light)>
     {
-        public (View, Light)? Render(in Frame frame, RenderGraph graph) => (new View(3), new Light(4));
+        public (View, Light)? Render(in RenderFrame frame, RenderGraph graph) => (new View(3), new Light(4));
     }
 
     private sealed class Egg : IRender<EggInput, View>
     {
-        public View? Render(in Frame frame, RenderGraph graph, in EggInput input) => new View(input.Light.Id);
+        public View? Render(in RenderFrame frame, RenderGraph graph, in EggInput input) => new View(input.Light.Id);
     }
 
     private sealed class Hen : IRender<HenInput, Light>
     {
-        public Light? Render(in Frame frame, RenderGraph graph, in HenInput input) => new Light(input.View.Id);
+        public Light? Render(in RenderFrame frame, RenderGraph graph, in HenInput input) => new Light(input.View.Id);
     }
 }

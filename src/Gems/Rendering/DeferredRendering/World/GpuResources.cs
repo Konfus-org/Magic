@@ -18,7 +18,7 @@ namespace Magic.DeferredRendering.World;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A texture is read and asked of the graph with every level and the sampler its asset asks for, then copied up in the
+/// A texture is read and asked of the GPU provider with every level and the sampler its asset asks for, then copied up in the
 /// frame after it arrives. A smoothly filtered texture is sampled with <paramref name="anisotropy"/>, and goes up
 /// without its <paramref name="droppedLevels"/> largest mip levels.
 /// </para>
@@ -31,7 +31,7 @@ namespace Magic.DeferredRendering.World;
 /// vertices and indices, the mesh table on a GPU that traces rays and the model table, and copied up.
 /// </para>
 /// <para>
-/// The pools and the textures are asked of the graph every frame, so the GPU provider keeps what they hold. Each pool
+/// The pools and the textures are asked for every frame, so the GPU provider keeps what they hold. Each pool
 /// hands out ranges first fit from a free list, and the vertex and index pools grow when none holds a model. A model
 /// not asked for in the seconds it is kept, and held by no renderer drawn, is evicted: its ranges go back to the free
 /// lists and its row of the model table is emptied, and the next ask makes it again.
@@ -41,6 +41,7 @@ internal sealed class GpuResources(
     ModelPreprocessor models,
     AssetManager assets,
     IShaderCompiler shaders,
+    IGraphicsApi gpu,
     Threads threads,
     int anisotropy,
     int droppedLevels
@@ -197,9 +198,9 @@ internal sealed class GpuResources(
     public Result Prepare(RenderGraph graph)
     {
         // The mesh table first, on a GPU that traces rays, so a model placed takes a range of it only there.
-        if (graph.Features.HasRayQuery)
+        if (gpu.Features.HasRayQuery)
         {
-            Result<GpuBuffer> meshes = graph.Buffer(new("Mesh table", MeshCapacity * GpuMesh.Bytes));
+            Result<GpuBuffer> meshes = gpu.GetBuffer(new("Mesh table", MeshCapacity * GpuMesh.Bytes));
             if (!meshes.Ok)
                 return Result.Failure(meshes.Error);
 
@@ -279,12 +280,12 @@ internal sealed class GpuResources(
             );
         }
 
-        Result<GpuBuffer> vertices = _vertices.GetBuffer(graph);
+        Result<GpuBuffer> vertices = _vertices.GetBuffer(gpu);
         if (!vertices.Ok)
             return Result.Failure(vertices.Error);
 
         VertexPool = vertices.Value;
-        Result<GpuBuffer> indices = _indices.GetBuffer(graph);
+        Result<GpuBuffer> indices = _indices.GetBuffer(gpu);
         if (!indices.Ok)
             return Result.Failure(indices.Error);
 
@@ -539,8 +540,8 @@ internal sealed class GpuResources(
             if (entry.State == GpuState.Failed || entry.Description is not { } description)
                 continue;
 
-            Result<GpuTexture> texture = graph.Texture(description);
-            Result<GpuSampler> sampler = graph.Sampler(entry.SamplerDescription);
+            Result<GpuTexture> texture = gpu.GetTexture(description);
+            Result<GpuSampler> sampler = gpu.GetSampler(entry.SamplerDescription);
             Result made = Result.FindFailure(texture, sampler);
             if (!made.Ok)
             {

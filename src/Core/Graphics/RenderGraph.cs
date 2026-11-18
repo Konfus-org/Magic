@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Utils;
 
 namespace Magic.Graphics;
 
@@ -18,7 +17,7 @@ namespace Magic.Graphics;
 /// </para>
 /// <para>
 /// Each method's parameters show which fields of a <see cref="GpuCommand"/> its kind reads. A gem that cannot record a
-/// part of its frame tells <see cref="Fail"/> and goes on. Use it only on the render thread.
+/// part of its frame tells <see cref="RenderFrame.Fail"/> and goes on. Use it only on the render thread.
 /// </para>
 /// </remarks>
 public sealed class RenderGraph
@@ -34,194 +33,18 @@ public sealed class RenderGraph
     /// </summary>
     private readonly ImmutableArray<GpuPass>.Builder _ordered = ImmutableArray.CreateBuilder<GpuPass>();
 
-    /// <summary>
-    /// A resource's name in each view after the first, made once, so a frame formats no text.
-    /// </summary>
-    private readonly Dictionary<(string Name, int View), string> _viewNames = [];
-
     private GpuPass? _pass;
 
-    private List<(RenderFailure Kind, string What)> _failures = [];
-
-    private List<(RenderFailure Kind, string What)> _failedBefore = [];
-
     /// <summary>
-    /// What failed in this frame, each one time, in the order first told to <see cref="Fail"/>.
-    /// </summary>
-    /// <remarks>
-    /// Read it late in the frame, after the other gems have recorded.
-    /// </remarks>
-    public ReadOnlySpan<(RenderFailure Kind, string What)> Failures => CollectionsMarshal.AsSpan(_failures);
-
-    /// <summary>
-    /// What the GPU has beyond the baseline; nothing while there is no provider.
-    /// </summary>
-    public GpuFeatures Features => Gpu?.Features ?? default;
-
-    /// <summary>
-    /// The window's image for this frame; <see cref="GpuTexture.None"/> headless, while the window is minimised or
-    /// while there is no provider.
-    /// </summary>
-    public GpuTexture WindowTarget => Gpu?.WindowTarget ?? GpuTexture.None;
-
-    /// <summary>
-    /// The view that the recording step runs for, from 0 (<see cref="RenderViews"/>); 0 in a step that runs once a
-    /// frame.
-    /// </summary>
-    /// <remarks>
-    /// A texture, buffer or acceleration structure asked for in a view after the first is that view's own, under the
-    /// same name. A gem keeps what else it holds for each view by this.
-    /// </remarks>
-    public int View { get; internal set; }
-
-    /// <summary>
-    /// The GPU provider that the graph's names resolve through. Core sets it after the gems load; null while no gem
+    /// The GPU provider whose upload ring the graph stages into. Core sets it after the gems load; null while no gem
     /// provides the GPU.
     /// </summary>
     internal IGraphicsApi? Gpu { get; set; }
 
     /// <summary>
-    /// The gems' steps that record into the graph. Core sets it after the gems load.
+    /// The gems' steps, which keep what failed in the frame. Core sets it after the gems load.
     /// </summary>
     internal Rendering? Rendering { get; set; }
-
-    /// <summary>
-    /// How many times <see cref="Fail"/> was told in this frame, repeats included.
-    /// </summary>
-    /// <remarks>
-    /// It shows that a step failed when its failure repeats an earlier step's.
-    /// </remarks>
-    internal int ToldCount { get; private set; }
-
-    /// <summary>
-    /// Whether no step makes <typeparamref name="T"/> this frame. Ask it late in the frame.
-    /// </summary>
-    /// <remarks>
-    /// The maker is out when no gem makes it, or when its step threw and waits for a retry, lacks an input, or told a
-    /// failure and made nothing.
-    /// </remarks>
-    public bool IsMakerOut<T>()
-        where T : struct => Rendering?.IsMakerOut(typeof(T)) ?? true;
-
-    /// <summary>
-    /// Gets the description that <paramref name="texture"/> was made from, the window's image included.
-    /// </summary>
-    public TextureDescription GetDescription(GpuTexture texture) =>
-        (Gpu ?? throw new InvalidOperationException("There is no GPU provider to describe a texture.")).GetDescription(
-            texture
-        );
-
-    /// <summary>
-    /// Gets the texture under the description's name. Ask in each frame that uses it.
-    /// </summary>
-    /// <remarks>
-    /// The heap id is known at once, to write into constants. The texture is made on the first ask and kept while each
-    /// frame asks with the same description, so its contents carry from frame to frame. A texture that no frame asked
-    /// for in a few frames is freed.
-    /// </remarks>
-    public Result<GpuTexture> Texture(in TextureDescription description) =>
-        Gpu?.GetTexture(description with { Name = GetViewName(description.Name) })
-        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
-
-    /// <summary>
-    /// Gets the buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture.
-    /// </summary>
-    /// <remarks>
-    /// When only the size changes, the new buffer gets as much of the old contents as fits, before the frame's passes.
-    /// Ask at the new size before any transfer into it in that frame: a transfer into the old buffer is lost.
-    /// </remarks>
-    public Result<GpuBuffer> Buffer(in BufferDescription description) =>
-        Gpu?.GetBuffer(description with { Name = GetViewName(description.Name) })
-        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
-
-    /// <summary>
-    /// Gets the bottom-level acceleration structure under the description's name, kept and freed as
-    /// <see cref="Texture"/> keeps and frees a texture.
-    /// </summary>
-    /// <remarks>
-    /// Use it only on a GPU that traces rays. The handle holds the device address that instances refer to. Build it
-    /// with <see cref="BuildAcceleration"/> after its triangles are uploaded.
-    /// </remarks>
-    public Result<GpuAcceleration> Acceleration(in BottomLevelDescription description) =>
-        Gpu?.GetAcceleration(description with { Name = GetViewName(description.Name) })
-        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
-
-    /// <summary>
-    /// Gets the top-level acceleration structure under the description's name, kept and freed as
-    /// <see cref="Texture"/> keeps and frees a texture. Only on a GPU that traces rays.
-    /// </summary>
-    public Result<GpuAcceleration> Acceleration(in TopLevelDescription description) =>
-        Gpu?.GetAcceleration(description with { Name = GetViewName(description.Name) })
-        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
-
-    /// <summary>
-    /// Gets the sampler for <paramref name="description"/>: the same one for each ask with the same description.
-    /// </summary>
-    public Result<GpuSampler> Sampler(in SamplerDescription description) =>
-        Gpu?.GetSampler(description) ?? Result.Failure("there is no GPU provider to make a sampler.");
-
-    /// <summary>
-    /// Whether <paramref name="shader"/> is built. The first ask starts the build; failed while there is no provider.
-    /// </summary>
-    public GpuState GetState(in ShaderEntry shader) => Gpu?.GetState(shader) ?? GpuState.Failed;
-
-    /// <summary>
-    /// Gets the state of all <paramref name="shaders"/>: failed if any failed, loading while any loads, else ready.
-    /// </summary>
-    /// <remarks>
-    /// Each is asked, so the first ask starts all of their builds.
-    /// </remarks>
-    public GpuState GetState(params ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
-    }
-
-    /// <summary>
-    /// Whether one of <paramref name="shaders"/> still builds. It stops at the first that does.
-    /// </summary>
-    /// <remarks>
-    /// Unlike <see cref="GetState(ReadOnlySpan{ShaderEntry})"/>, a failed shader does not hide one that still builds.
-    /// </remarks>
-    public bool IsAnyLoading(params ReadOnlySpan<ShaderEntry> shaders)
-    {
-        foreach (ShaderEntry shader in shaders)
-        {
-            if (GetState(shader) == GpuState.Loading)
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Tells that <paramref name="what"/> failed in this frame, so that it shows in the picture.
-    /// </summary>
-    /// <remarks>
-    /// <paramref name="what"/> is a short constant text, such as "Shadows are not traced". The first failed frame after
-    /// a good one logs it one time, with <paramref name="reason"/>, the full error. Tell it in each frame that fails,
-    /// and try again in the next.
-    /// </remarks>
-    public void Fail(RenderFailure kind, string what, string reason)
-    {
-        ToldCount++;
-        (RenderFailure, string) failure = (kind, what);
-        if (_failures.Contains(failure))
-            return;
-
-        _failures.Add(failure);
-        if (!_failedBefore.Contains(failure))
-            Log.Error($"{kind} failed: {what}. {reason}");
-    }
 
     /// <summary>
     /// Begins a compute pass that runs <paramref name="shader"/> with <paramref name="constants"/>. A dispatch ends it.
@@ -350,7 +173,7 @@ public sealed class RenderGraph
     /// </summary>
     /// <remarks>
     /// Write them before the frame is presented. Zero rows record nothing. When the ring has no room, it gives an empty
-    /// span and tells <see cref="Fail"/>, and the caller keeps the rows as not sent.
+    /// span and tells <see cref="RenderFrame.Fail"/>, and the caller keeps the rows as not sent.
     /// </remarks>
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
@@ -516,16 +339,6 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Empties <see cref="Failures"/> for a new frame, and keeps the last frame's to find which failures are new.
-    /// </summary>
-    internal void StartFailures()
-    {
-        (_failedBefore, _failures) = (_failures, _failedBefore);
-        _failures.Clear();
-        ToldCount = 0;
-    }
-
-    /// <summary>
     /// Puts the passes recorded since the last call in the order they run, after those of every call before: stage by
     /// stage, and in the order they were recorded within one. Core calls it between two views, so a view's passes all
     /// run before the next view's.
@@ -618,23 +431,6 @@ public sealed class RenderGraph
         };
 
     /// <summary>
-    /// Gets <paramref name="name"/> in the first view, and a name of its own in each view after it.
-    /// </summary>
-    private string GetViewName(string name)
-    {
-        if (View == 0)
-            return name;
-
-        if (!_viewNames.TryGetValue((name, View), out string? viewName))
-        {
-            viewName = $"{name}, view {View}";
-            _viewNames[(name, View)] = viewName;
-        }
-
-        return viewName;
-    }
-
-    /// <summary>
     /// Gets room for <paramref name="bytes"/> in the frame's upload ring. Without room or a provider, it gives none and
     /// tells the upload as failed.
     /// </summary>
@@ -642,7 +438,7 @@ public sealed class RenderGraph
     {
         GpuUpload upload = Gpu is { } gpu ? gpu.BeginUpload(bytes) : default;
         if (upload.Buffer.IsNone)
-            Fail(
+            Rendering?.Fail(
                 RenderFailure.Resource,
                 "Uploads are dropped",
                 "the GPU provider has no room to stage them, or there is no provider."

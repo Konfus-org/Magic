@@ -32,7 +32,7 @@ namespace Magic.DeferredRendering.World;
 /// and shader and the index of the model's row in the failure table.
 /// </para>
 /// </remarks>
-internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
+internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuResources resources)
 {
     /// <summary>
     /// The most rows the table and the material table hold.
@@ -212,14 +212,14 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     public Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> Upload(RenderGraph graph)
     {
         // A table asked for bigger than last frame keeps what it held.
-        Result<GpuBuffer> rows = graph.Buffer(new("Instance table", (long)_rows.Length * GpuInstance.Bytes));
+        Result<GpuBuffer> rows = gpu.GetBuffer(new("Instance table", (long)_rows.Length * GpuInstance.Bytes));
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 
         if (_materialSlots.Count > _materialRows.Length)
             Array.Resize(ref _materialRows, GetCapacity(_materialSlots.Count));
 
-        Result<GpuBuffer> materials = graph.Buffer(
+        Result<GpuBuffer> materials = gpu.GetBuffer(
             new("Material table", (long)_materialRows.Length * GpuMaterial.Bytes)
         );
         if (!materials.Ok)
@@ -263,7 +263,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
             return Result.Failure("the material table was not staged.");
 
         // The failure table, asked for after the material rows made its rows, so each row they name is in it.
-        Result<GpuBuffer> failures = graph.Buffer(new("Failure table", (long)_failureRows.Length * GpuFailure.Bytes));
+        Result<GpuBuffer> failures = gpu.GetBuffer(new("Failure table", (long)_failureRows.Length * GpuFailure.Bytes));
         if (!failures.Ok)
             return Result.Failure(failures.Error);
 

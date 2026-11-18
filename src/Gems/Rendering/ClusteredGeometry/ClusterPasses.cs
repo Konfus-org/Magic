@@ -43,6 +43,8 @@ internal sealed class ClusterPasses
         .. Enumerable.Range(0, 32).Select(level => $"Build depth pyramid {level}"),
     ];
 
+    private readonly IGraphicsApi _gpu;
+
     private readonly ShaderEntry _budgetShader;
 
     private readonly ShaderEntry _countShader;
@@ -71,8 +73,9 @@ internal sealed class ClusterPasses
     /// </summary>
     private readonly List<ShaderEntry> _resolveShaders = [];
 
-    public ClusterPasses(AssetManager assets)
+    public ClusterPasses(AssetManager assets, IGraphicsApi gpu)
     {
+        _gpu = gpu;
         _budgetShader = PassShaders.GetEntry(assets, "BudgetClusters", "BudgetClusters");
         _countShader = PassShaders.GetEntry(assets, "CullClusters", "CountClusters");
         _fitShader = PassShaders.GetEntry(assets, "CullClusters", "FitClusters");
@@ -140,36 +143,55 @@ internal sealed class ClusterPasses
     /// budget, draw the main view twice, what last frame's pyramid shows, then what it hid and this frame's shows, draw
     /// the nearest glass in front of it into the glass's buffer, and resolve every pixel's material into the GBuffer.
     /// </remarks>
-    public Result Record(RenderGraph graph, GpuView gpu, ClusterPools pools, ClusteredGeometrySettings settings)
+    public Result Record(
+        in RenderFrame frame,
+        RenderGraph graph,
+        GpuView gpu,
+        ClusterPools pools,
+        ClusteredGeometrySettings settings
+    )
     {
         (int width, int height) = (gpu.Width, gpu.Height);
         int depthPyramidLevels = TextureDescription.GetFullLevels(width, height);
-        Result<GpuBuffer> budget = graph.Buffer(new("Cluster budget", BudgetBytes));
-        Result<GpuBuffer> counts = graph.Buffer(new("Counts", CountsBytes, IndirectUsage));
-        Result<GpuBuffer> instanceRows = graph.Buffer(new("Instance rows", (long)gpu.InstanceCapacity * sizeof(uint)));
-        Result<GpuBuffer> retestArguments = graph.Buffer(new("Retest arguments", RetestArgumentsBytes, IndirectUsage));
-        Result<GpuBuffer> visibleClusters = graph.Buffer(new("Visible clusters", (long)MaxVisibleClusters * 8));
-        Result<GpuBuffer> drawArguments = graph.Buffer(
-            new("Draw arguments", (long)MaxVisibleClusters * DrawRegions * DrawArgumentsBytes, IndirectUsage)
+        Result<GpuBuffer> budget = _gpu.GetBuffer(new("Cluster budget", BudgetBytes), frame.View);
+        Result<GpuBuffer> counts = _gpu.GetBuffer(new("Counts", CountsBytes, IndirectUsage), frame.View);
+        Result<GpuBuffer> instanceRows = _gpu.GetBuffer(
+            new("Instance rows", (long)gpu.InstanceCapacity * sizeof(uint)),
+            frame.View
         );
-        Result<GpuBuffer> retestList = graph.Buffer(new("Retest list", (long)MaxVisibleClusters * 8));
-        Result<GpuTexture> visibility = graph.Texture(
-            new("Visibility", width, height, GpuFormat.R32Uint, TextureUsages.ColorTarget | TextureUsages.Sampled)
+        Result<GpuBuffer> retestArguments = _gpu.GetBuffer(
+            new("Retest arguments", RetestArgumentsBytes, IndirectUsage),
+            frame.View
+        );
+        Result<GpuBuffer> visibleClusters = _gpu.GetBuffer(
+            new("Visible clusters", (long)MaxVisibleClusters * 8),
+            frame.View
+        );
+        Result<GpuBuffer> drawArguments = _gpu.GetBuffer(
+            new("Draw arguments", (long)MaxVisibleClusters * DrawRegions * DrawArgumentsBytes, IndirectUsage),
+            frame.View
+        );
+        Result<GpuBuffer> retestList = _gpu.GetBuffer(new("Retest list", (long)MaxVisibleClusters * 8), frame.View);
+        Result<GpuTexture> visibility = _gpu.GetTexture(
+            new("Visibility", width, height, GpuFormat.R32Uint, TextureUsages.ColorTarget | TextureUsages.Sampled),
+            frame.View
         );
         // The glass's buffer only while the view has glass targets to resolve it into.
         Result<GpuTexture> glassVisibility = gpu.GlassDepth.IsNone
             ? Result.Success(GpuTexture.None)
-            : graph.Texture(
+            : _gpu.GetTexture(
                 new(
                     "Glass visibility",
                     width,
                     height,
                     GpuFormat.R32Uint,
                     TextureUsages.ColorTarget | TextureUsages.Sampled
-                )
+                ),
+                frame.View
             );
-        Result<GpuTexture> depthPyramid = graph.Texture(
-            new("Depth pyramid", width, height, GpuFormat.R32Sfloat, Levels: depthPyramidLevels)
+        Result<GpuTexture> depthPyramid = _gpu.GetTexture(
+            new("Depth pyramid", width, height, GpuFormat.R32Sfloat, Levels: depthPyramidLevels),
+            frame.View
         );
         Result asked = Result.FindFailure(
             visibility,

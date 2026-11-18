@@ -6,7 +6,6 @@ using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -77,6 +76,8 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
     private readonly IEcs _ecs;
 
+    private readonly IGraphicsApi _gpu;
+
     private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
 
     private readonly ShaderEntry _scatterShader;
@@ -98,10 +99,11 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// </summary>
     private readonly SettleWait _settling;
 
-    internal Renderer(AssetManager assets, IEcs ecs, Threads threads)
+    internal Renderer(AssetManager assets, IEcs ecs, Threads threads, IGraphicsApi gpu)
     {
         _settling = new SettleWait(threads);
         _ecs = ecs;
+        _gpu = gpu;
         _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
         _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
         _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
@@ -114,11 +116,11 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// The frame's air, or none while the shaders build, what they read and write is not made, or the weather holds no
     /// haze or clouds. With none, the air changes nothing.
     /// </returns>
-    public Air? Render(in Frame frame, RenderGraph graph, in WeatherFXInput input)
+    public Air? Render(in RenderFrame frame, RenderGraph graph, in WeatherFXInput input)
     {
-        GpuState shaders = graph.GetState(_scatterShader, _integrateShader);
+        GpuState shaders = _gpu.GetState(_scatterShader, _integrateShader);
         if (shaders == GpuState.Failed)
-            graph.Fail(RenderFailure.Shader, "Air is not filled", "a shader of the air was not built.");
+            frame.Fail(RenderFailure.Shader, "Air is not filled", "a shader of the air was not built.");
 
         if (
             _weather.TakeNewest() is not { First: [var weather, ..] }
@@ -136,33 +138,33 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         GpuView gpu = input.View;
         (int Width, int Height) size = gpu.Scaled(weather.Fog.VolumeScale);
         int written = (int)(frame.Index % 2);
-        Result<GpuTexture> scattering = graph.Texture(GetVolume(_scatteringNames[written], size));
-        Result<GpuTexture> history = graph.Texture(GetVolume(_scatteringNames[1 - written], size));
-        Result<GpuTexture> air = graph.Texture(GetVolume("Air", size));
-        Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
+        Result<GpuTexture> scattering = _gpu.GetTexture(GetVolume(_scatteringNames[written], size), frame.View);
+        Result<GpuTexture> history = _gpu.GetTexture(GetVolume(_scatteringNames[1 - written], size), frame.View);
+        Result<GpuTexture> air = _gpu.GetTexture(GetVolume("Air", size), frame.View);
+        Result<GpuSampler> sampler = _gpu.GetSampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         if (Result.FindFailure(scattering, history, air, sampler) is { Ok: false } failed)
         {
             _settling.End();
-            graph.Fail(RenderFailure.Resource, "Air is not filled", failed.Error);
+            frame.Fail(RenderFailure.Resource, "Air is not filled", failed.Error);
 
             return null;
         }
 
         GpuTexture? cloudy = null;
-        GpuState cloudShader = graph.GetState(_cloudShader);
+        GpuState cloudShader = _gpu.GetState(_cloudShader);
         if (weather.Clouds.Cover > 0)
         {
             if (cloudShader == GpuState.Failed)
             {
-                graph.Fail(RenderFailure.Weather, "Clouds are not drawn", "the clouds' shader was not built.");
+                frame.Fail(RenderFailure.Weather, "Clouds are not drawn", "the clouds' shader was not built.");
             }
             else if (cloudShader == GpuState.Ready)
             {
-                Result<GpuTexture> clouds = graph.Texture(_cloudsDescription);
+                Result<GpuTexture> clouds = _gpu.GetTexture(_cloudsDescription, frame.View);
                 if (clouds.Ok)
                     cloudy = clouds.Value;
                 else
-                    graph.Fail(RenderFailure.Weather, "Clouds are not drawn", clouds.Error);
+                    frame.Fail(RenderFailure.Weather, "Clouds are not drawn", clouds.Error);
             }
         }
 
@@ -186,12 +188,12 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
             return null;
 
         // What the view keeps from frame to frame, by its number.
-        while (_views.Count <= graph.View)
+        while (_views.Count <= frame.View)
         {
             _views.Add(default);
         }
 
-        ((int Width, int Height)? filled, GpuTexture? drawnClouds, int blended) = _views[graph.View];
+        ((int Width, int Height)? filled, GpuTexture? drawnClouds, int blended) = _views[frame.View];
 
         // Each cell's light and haze, blended with last frame's where the cell was then, then summed along each column
         // away from the camera. The pass header's x is the frame's buffer, y the scattering written, z last frame's, 0
@@ -243,7 +245,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
                 .DispatchOver(CloudTexels / block, CloudTexels / block);
         }
 
-        _views[graph.View] = (size, cloudy, blended);
+        _views[frame.View] = (size, cloudy, blended);
 
         return new Air(air.Value, cloudy);
     }
@@ -252,13 +254,13 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// Asks for every shader of the air and the clouds each frame, whatever the weather, so each is built or failed
     /// before a domain shows. Ends the wait for the air to settle while it has no view to fill.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
+    public void Render(in RenderFrame frame, RenderGraph graph)
     {
-        if (!graph.IsAnyLoading(_scatterShader, _integrateShader, _cloudShader))
+        if (!_gpu.IsAnyLoading(_scatterShader, _integrateShader, _cloudShader))
             _built.TrySetResult();
 
         // A view maker that is out leaves the air no view to fill for good: the failure is already told.
-        if (graph.IsMakerOut<GpuView>())
+        if (frame.IsUnavailable<GpuView>())
             _settling.End();
     }
 

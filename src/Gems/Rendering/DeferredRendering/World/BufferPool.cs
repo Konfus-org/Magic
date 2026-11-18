@@ -25,8 +25,8 @@ public sealed class BufferPool(BufferDescription buffer, int rowBytes, int rows)
     /// Ask for it after this frame's <see cref="Allocate"/> calls and before uploading into it or naming it, as one
     /// that grew is a new buffer.
     /// </remarks>
-    public Result<GpuBuffer> GetBuffer(RenderGraph graph) =>
-        graph.Buffer(buffer with { Bytes = (long)_rows * rowBytes });
+    public Result<GpuBuffer> GetBuffer(IGraphicsApi gpu) =>
+        gpu.GetBuffer(buffer with { Bytes = (long)_rows * rowBytes });
 
     /// <summary>
     /// Takes <paramref name="count"/> rows, and grows the pool first when no free range holds them.

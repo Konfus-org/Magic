@@ -254,14 +254,15 @@ public sealed class Renderer
             models,
             assets,
             shaders,
+            gpu,
             threads,
             settings.Anisotropy,
             settings.DroppedTextureLevels
         );
-        _instances = new InstanceTable(assets, _resources);
-        _lightTiles = new LightTiles(assets);
-        _banner = new FailureBanner(assets);
-        _cover = new Cover(assets);
+        _instances = new InstanceTable(assets, gpu, _resources);
+        _lightTiles = new LightTiles(assets, gpu);
+        _banner = new FailureBanner(assets, gpu);
+        _cover = new Cover(assets, gpu);
         _viewShaders = _lightTiles.Shaders;
 
         _gpu = gpu;
@@ -290,12 +291,12 @@ public sealed class Renderer
     /// The world, its instances and the frame's views; none while the shaders build, the pools are not made, or nothing
     /// was published yet.
     /// </returns>
-    public (GpuWorld, GpuInstances, RenderViews)? Render(in Frame frame, RenderGraph graph)
+    public (GpuWorld, GpuInstances, RenderViews)? Render(in RenderFrame frame, RenderGraph graph)
     {
         // The shaders are the GPU provider's to build, the first ask starting each.
-        GpuState shaders = graph.GetState(_viewShaders.AsSpan());
+        GpuState shaders = _gpu.GetState(_viewShaders.AsSpan());
         if (shaders == GpuState.Failed)
-            Fail(graph, RenderFailure.Shader, "a shader of the view was not built.");
+            Fail(frame, RenderFailure.Shader, "a shader of the view was not built.");
 
         if (shaders != GpuState.Ready)
             return null;
@@ -314,7 +315,7 @@ public sealed class Renderer
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
-            Fail(graph, RenderFailure.Resource, pools.Error);
+            Fail(frame, RenderFailure.Resource, pools.Error);
 
             return null;
         }
@@ -345,7 +346,7 @@ public sealed class Renderer
         // they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
-            bool isPrepared = !graph.IsAnyLoading(
+            bool isPrepared = !_gpu.IsAnyLoading(
                 _shadeShader with
                 {
                     TypeArguments = _skyType,
@@ -365,7 +366,7 @@ public sealed class Renderer
                 _lightViewShader,
                 _showShader
             );
-            isPrepared &= !_cover.IsLoading(graph);
+            isPrepared &= !_cover.IsLoading();
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);
@@ -398,11 +399,11 @@ public sealed class Renderer
         Size picture = _settings.Resolution;
         if (picture.Width <= 0 || picture.Height <= 0)
         {
-            TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
+            TextureDescription window = _gpu.WindowTarget.IsNone ? default : _gpu.GetDescription(_gpu.WindowTarget);
             picture = window.Width > 0 ? new Size(window.Width, window.Height) : new Size(DefaultWidth, DefaultHeight);
         }
 
-        Result<GpuBuffer> constants = graph.Buffer(new("World constants", 1024));
+        Result<GpuBuffer> constants = _gpu.GetBuffer(new("World constants", 1024));
         Result<LightBuffers> lights = _lightTiles.Prepare(
             graph,
             inputs.PointLights,
@@ -412,7 +413,7 @@ public sealed class Renderer
         Result asked = Result.FindFailure(tables, constants, lights);
         if (!asked.Ok)
         {
-            Fail(graph, RenderFailure.Resource, asked.Error);
+            Fail(frame, RenderFailure.Resource, asked.Error);
 
             return null;
         }
@@ -423,10 +424,10 @@ public sealed class Renderer
         Screenshot? screenshot = null;
         if (_screenshots.Reader.TryPeek(out ScreenshotRequested saved) && !IsHdr(saved.Path))
         {
-            Result<GpuBuffer> readback = graph.Buffer(
+            Result<GpuBuffer> readback = _gpu.GetBuffer(
                 new("Output readback", (long)picture.Width * picture.Height * 4, BufferUsages.Readback)
             );
-            Result<GpuTexture> copy = graph.Texture(
+            Result<GpuTexture> copy = _gpu.GetTexture(
                 new(
                     "Screenshot copy",
                     picture.Width,
@@ -470,7 +471,7 @@ public sealed class Renderer
         // tables through no view takes.
         if (!graph.Upload(world.Frame, [world.ModelsRow], GpuModels.Offset))
         {
-            Fail(graph, RenderFailure.Resource, "the world's constants were not staged.");
+            Fail(frame, RenderFailure.Resource, "the world's constants were not staged.");
 
             return null;
         }
@@ -493,7 +494,7 @@ public sealed class Renderer
     /// The view of this turn on the GPU: its camera's targets at its size, the frame's rows in its own buffer and its
     /// tiles' lights; none while the render texture its camera draws into is not made.
     /// </summary>
-    public GpuView? Render(in Frame frame, RenderGraph graph, in ViewInput input)
+    public GpuView? Render(in RenderFrame frame, RenderGraph graph, in ViewInput input)
     {
         GpuWorld world = input.World;
         if (world.Inputs is not { } inputs)
@@ -504,9 +505,9 @@ public sealed class Renderer
 
         // The view's camera, what it draws into, and where the view is in the whole picture: a section of the window,
         // at the field of view of the settings when that is more than 0, or all of a render texture.
-        (Transform Transform, Camera Camera) camera = GetCamera(inputs.Cameras, graph.View);
+        (Transform Transform, Camera Camera) camera = GetCamera(inputs.Cameras, frame.View);
         CameraTarget into = camera.Camera.Target;
-        GpuTexture target = graph.WindowTarget;
+        GpuTexture target = _gpu.WindowTarget;
         Rectangle shown = GetSection(into.Section, world.Picture);
         Rectangle part = default;
         if (!into.IsWindow)
@@ -515,14 +516,14 @@ public sealed class Renderer
             if (target.IsNone)
                 return null;
 
-            TextureDescription texture = graph.GetDescription(target);
+            TextureDescription texture = _gpu.GetDescription(target);
             shown = new Rectangle(0, 0, texture.Width, texture.Height);
         }
         else
         {
             if (!target.IsNone)
             {
-                TextureDescription window = graph.GetDescription(target);
+                TextureDescription window = _gpu.GetDescription(target);
                 part = GetSection(into.Section, new Size(window.Width, window.Height));
             }
 
@@ -551,17 +552,20 @@ public sealed class Renderer
             GpuFormat.D32Sfloat,
             TextureUsages.DepthTarget | TextureUsages.Sampled
         );
-        Result<GpuBuffer> constants = graph.Buffer(new("Frame constants", 1024));
-        Result<GpuTexture> depth = graph.Texture(depthTarget);
-        Result<GpuTexture> glassDepth = GetGlass(depthTarget with { Name = "Glass depth" });
-        Result<GpuTexture> glassBase = GetGlass(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> glassNormal = GetGlass(GetTarget("Glass normal", GpuFormat.R16G16Unorm));
-        Result<GpuTexture> glassSurface = GetGlass(GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> normal = graph.Texture(GetTarget("GBuffer normal", GpuFormat.R16G16Unorm));
-        Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> hdr = graph.Texture(
+        Result<GpuBuffer> constants = _gpu.GetBuffer(new("Frame constants", 1024), frame.View);
+        Result<GpuTexture> depth = _gpu.GetTexture(depthTarget, frame.View);
+        Result<GpuTexture> glassDepth = GetGlass(depthTarget with { Name = "Glass depth" }, frame.View);
+        Result<GpuTexture> glassBase = GetGlass(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm), frame.View);
+        Result<GpuTexture> glassNormal = GetGlass(GetTarget("Glass normal", GpuFormat.R16G16Unorm), frame.View);
+        Result<GpuTexture> glassSurface = GetGlass(
+            GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat),
+            frame.View
+        );
+        Result<GpuTexture> normal = _gpu.GetTexture(GetTarget("GBuffer normal", GpuFormat.R16G16Unorm), frame.View);
+        Result<GpuTexture> baseColor = _gpu.GetTexture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm), frame.View);
+        Result<GpuTexture> surface = _gpu.GetTexture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm), frame.View);
+        Result<GpuTexture> velocity = _gpu.GetTexture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat), frame.View);
+        Result<GpuTexture> hdr = _gpu.GetTexture(
             new(
                 "HDR",
                 width,
@@ -572,18 +576,20 @@ public sealed class Renderer
                     | TextureUsages.Sampled
                     | TextureUsages.CopyDestination
                     | TextureUsages.CopySource
-            )
+            ),
+            frame.View
         );
-        Result<GpuTexture> output = graph.Texture(
+        Result<GpuTexture> output = _gpu.GetTexture(
             new(
                 "Output",
                 width,
                 height,
                 GpuFormat.R8G8B8A8Unorm,
                 TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.Sampled | TextureUsages.CopySource
-            )
+            ),
+            frame.View
         );
-        Result<GpuBuffer> tiles = LightTiles.PrepareTiles(graph, width, height);
+        Result<GpuBuffer> tiles = _lightTiles.PrepareTiles(frame.View, width, height);
         Result asked = Result.FindFailure(
             constants,
             depth,
@@ -601,18 +607,18 @@ public sealed class Renderer
         );
         if (!asked.Ok)
         {
-            Fail(graph, RenderFailure.Resource, asked.Error);
+            Fail(frame, RenderFailure.Resource, asked.Error);
 
             return null;
         }
 
         // What the view keeps from frame to frame, by its number.
-        while (_views.Count <= graph.View)
+        while (_views.Count <= frame.View)
         {
-            _views.Add(new FrameView());
+            _views.Add(new FrameView(_gpu));
         }
 
-        FrameView frameView = _views[graph.View];
+        FrameView frameView = _views[frame.View];
         GpuView view = new()
         {
             Frame = constants.Value,
@@ -672,7 +678,7 @@ public sealed class Renderer
         );
         if (!uploaded.Ok)
         {
-            Fail(graph, RenderFailure.Resource, uploaded.Error);
+            Fail(frame, RenderFailure.Resource, uploaded.Error);
 
             return null;
         }
@@ -686,14 +692,14 @@ public sealed class Renderer
 
         TextureDescription GetTarget(string name, GpuFormat format) => new(name, width, height, format);
 
-        Result<GpuTexture> GetGlass(in TextureDescription glass) =>
-            hasGlass ? graph.Texture(glass) : Result.Success(GpuTexture.None);
+        Result<GpuTexture> GetGlass(in TextureDescription glass, int view) =>
+            hasGlass ? _gpu.GetTexture(glass, view) : Result.Success(GpuTexture.None);
     }
 
     /// <summary>
     /// Records the view's passes, each in its stage, from the view the view's step made.
     /// </summary>
-    public FinalImage? Render(in Frame frame, RenderGraph graph, in ShadingInput input)
+    public FinalImage? Render(in RenderFrame frame, RenderGraph graph, in ShadingInput input)
     {
         // The shading is specialised on the sky's type where it made its tables, else on the open sky. The shaders are
         // the GPU provider's to build, the first ask starting each; while one failed, the shading draws nothing, and
@@ -702,9 +708,9 @@ public sealed class Renderer
         ImmutableArray<ShaderTypeArgument> sky = SkyTables.GetSkyType(input.Sky, _openSky);
         ShaderEntry shadeShader = _shadeShader with { TypeArguments = sky };
         ShaderEntry translucentShader = _translucentShader with { TypeArguments = sky };
-        GpuState shaders = graph.GetState(shadeShader, translucentShader, _lightViewShader, _showShader);
+        GpuState shaders = _gpu.GetState(shadeShader, translucentShader, _lightViewShader, _showShader);
         if (shaders == GpuState.Failed)
-            graph.Fail(RenderFailure.Shader, "Surfaces are not shaded", "a shader of the shading was not built.");
+            frame.Fail(RenderFailure.Shader, "Surfaces are not shaded", "a shader of the shading was not built.");
 
         if (shaders != GpuState.Ready)
             return null;
@@ -732,7 +738,7 @@ public sealed class Renderer
             .Compute(
                 "Shade surfaces",
                 shadeShader,
-                new GpuConstants(gpu.Frame.Id, GetSkyFailures(graph.Failures)),
+                new GpuConstants(gpu.Frame.Id, GetSkyFailures(frame.Failures)),
                 RenderStages.Shade
             )
             .Reads(tables)
@@ -796,13 +802,14 @@ public sealed class Renderer
         if (
             _screenshots.Reader.TryPeek(out ScreenshotRequested asked)
             && IsHdr(asked.Path)
-            && gpu.Target == graph.WindowTarget
-            && graph.View == input.Views.Count - 1
+            && gpu.Target == _gpu.WindowTarget
+            && frame.View == input.Views.Count - 1
         )
         {
             _screenshots.Reader.TryRead(out _);
-            Result<GpuBuffer> readback = graph.Buffer(
-                new("HDR readback", (long)gpu.Width * gpu.Height * 8, BufferUsages.Readback)
+            Result<GpuBuffer> readback = _gpu.GetBuffer(
+                new("HDR readback", (long)gpu.Width * gpu.Height * 8, BufferUsages.Readback),
+                frame.View
             );
             if (readback.Ok)
             {
@@ -816,7 +823,7 @@ public sealed class Renderer
         // Behind the full cover, the effects start their history anew each frame, so the exposure takes each frame's
         // value at once while the world settles, and adapts from the settled picture once the cover fades.
         if (input.Effects is { } effects)
-            effects.Record(graph, _world.CoverOpacity >= 1 ? gpu with { HasHistory = false } : gpu, frame.Index);
+            effects.Record(frame, graph, _world.CoverOpacity >= 1 ? gpu with { HasHistory = false } : gpu);
 
         // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
         // tones shown at the gamma. A picture that no effects finished is tonemapped first.
@@ -838,21 +845,22 @@ public sealed class Renderer
 
         // What the view's target and a screenshot show: the output as a gem upscaled it to the size it is shown at, or
         // the output itself, stretched over the view's part of the target with the upscale filter.
-        GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(graph, gpu) : GpuTexture.None;
+        GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(frame, graph, gpu) : GpuTexture.None;
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
-        if (gpu.Target != graph.WindowTarget)
+        if (gpu.Target != _gpu.WindowTarget)
         {
             // A render texture is sRGB, so a material reads linear colour from it. The picture is encoded for the
             // screen already: it is stretched into a texture of the same size, then copied with its bytes unchanged.
-            TextureDescription target = graph.GetDescription(gpu.Target);
-            Result<GpuTexture> picture = graph.Texture(
+            TextureDescription target = _gpu.GetDescription(gpu.Target);
+            Result<GpuTexture> picture = _gpu.GetTexture(
                 new(
                     "Render texture picture",
                     target.Width,
                     target.Height,
                     GpuFormat.R8G8B8A8Unorm,
                     TextureUsages.CopyDestination | TextureUsages.CopySource
-                )
+                ),
+                frame.View
             );
             if (picture.Ok)
             {
@@ -860,7 +868,7 @@ public sealed class Renderer
                 graph.Copy(picture.Value, gpu.Target, RenderStages.Post);
             }
             else
-                graph.Fail(RenderFailure.Resource, "Render texture is not drawn", picture.Error);
+                frame.Fail(RenderFailure.Resource, "Render texture is not drawn", picture.Error);
         }
         else if (!gpu.Target.IsNone)
             graph.Blit(shown, gpu.Target, gpu.TargetPart, RenderStages.Post, upscaleFilter);
@@ -868,10 +876,10 @@ public sealed class Renderer
         // The screenshot asked for: each view of the window copied into the whole picture at its part, stretched to it
         // with the upscale filter, and the picture read back after the last view, which is one of the window; written
         // once the GPU is done with it.
-        if (input.World.Screenshot is { } shot && gpu.Target == graph.WindowTarget)
+        if (input.World.Screenshot is { } shot && gpu.Target == _gpu.WindowTarget)
         {
             graph.Blit(shown, shot.Copy, gpu.ShownPart, RenderStages.Post, upscaleFilter);
-            if (graph.View == input.Views.Count - 1)
+            if (frame.View == input.Views.Count - 1)
             {
                 Size picture = input.World.Picture;
                 _screenshots.Reader.TryRead(out _);
@@ -1123,13 +1131,13 @@ public sealed class Renderer
     /// A part of the window that no view draws this frame, or the whole window while the world's step draws nothing,
     /// then shows black and not an older frame that the overlay draws over.
     /// </remarks>
-    private static void ClearWindow(RenderGraph graph)
+    private void ClearWindow(RenderGraph graph)
     {
-        GpuTexture window = graph.WindowTarget;
+        GpuTexture window = _gpu.WindowTarget;
         if (window.IsNone)
             return;
 
-        Result<GpuTexture> black = graph.Texture(
+        Result<GpuTexture> black = _gpu.GetTexture(
             new("Black", 1, 1, GpuFormat.R8G8B8A8Unorm, TextureUsages.CopyDestination | TextureUsages.CopySource)
         );
         if (black.Ok && graph.Upload(black.Value, [0, 0, 0, 255]))
@@ -1140,11 +1148,11 @@ public sealed class Renderer
     /// Lets the loading domain show when the world's or the view's step is out, fills the window with black under the
     /// views, and draws the cover and the frame's render failures over the window.
     /// </summary>
-    void IRender.Render(in Frame frame, RenderGraph graph)
+    void IRender.Render(in RenderFrame frame, RenderGraph graph)
     {
         // A step that threw never reaches its own release; while it renders, it releases when it is ready, so
         // nothing pops in.
-        if (graph.IsMakerOut<GpuWorld>() || graph.IsMakerOut<GpuView>())
+        if (frame.IsUnavailable<GpuWorld>() || frame.IsUnavailable<GpuView>())
             EndPreparing();
 
         // PROTO: the first cover of a load, over the old world, is black. No hook tells the gem the loading screen
@@ -1153,7 +1161,7 @@ public sealed class Renderer
             _cover.MakeBlack();
 
         ClearWindow(graph);
-        _cover.Record(graph, _world.CoverOpacity);
+        _cover.Record(frame, graph, _world.CoverOpacity);
         _banner.Record(graph, frame);
     }
 
@@ -1171,12 +1179,12 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Tells the graph that the world or a view is not made in this frame, and lets the loading domain show without
+    /// Tells the frame that the world or a view is not made in this frame, and lets the loading domain show without
     /// it.
     /// </summary>
-    private void Fail(RenderGraph graph, RenderFailure kind, string reason)
+    private void Fail(in RenderFrame frame, RenderFailure kind, string reason)
     {
-        graph.Fail(kind, "View is not made", reason);
+        frame.Fail(kind, "View is not made", reason);
         EndPreparing();
     }
 

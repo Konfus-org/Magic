@@ -22,7 +22,7 @@ internal readonly record struct LightBuffers(GpuBuffer Table, int Count);
 /// It uploads the world's local lights each frame, and runs a pass that sets each tile's bit for every light that
 /// touches what the tile shows.
 /// </remarks>
-internal sealed class LightTiles(AssetManager assets)
+internal sealed class LightTiles(AssetManager assets, IGraphicsApi gpu)
 {
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
@@ -51,10 +51,10 @@ internal sealed class LightTiles(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
     /// <summary>
-    /// Asks for the words of bits of each tile of a view of this size, a bit per light.
+    /// Asks for the words of bits of each tile of <paramref name="view"/> at this size, a bit per light.
     /// </summary>
-    public static Result<GpuBuffer> PrepareTiles(RenderGraph graph, int width, int height) =>
-        graph.Buffer(new("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint)));
+    public Result<GpuBuffer> PrepareTiles(int view, int width, int height) =>
+        gpu.GetBuffer(new("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint)), view);
 
     /// <summary>
     /// Asks for the table, and writes the world's lights into it, point lights first, in the frame's upload pass.
@@ -66,7 +66,7 @@ internal sealed class LightTiles(AssetManager assets)
         EcsSnapshot<Transform, RectLight> rects
     )
     {
-        Result<GpuBuffer> table = graph.Buffer(new("Light table", MaxLights * GpuLight.Bytes));
+        Result<GpuBuffer> table = gpu.GetBuffer(new("Light table", MaxLights * GpuLight.Bytes));
         if (!table.Ok)
             return Result.Failure(table.Error);
 

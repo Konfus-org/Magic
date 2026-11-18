@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Assets;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.DeferredRendering;
@@ -20,7 +19,7 @@ namespace Magic.DeferredRendering;
 /// are not built. Its shader is in the gem's assembly, registered at its asset path; a file at that path replaces it.
 /// Render thread.
 /// </remarks>
-internal sealed class FailureBanner(AssetManager assets) : IDisposable
+internal sealed class FailureBanner(AssetManager assets, IGraphicsApi gpu) : IDisposable
 {
     /// <summary>
     /// The asset path of the banner's shader, and the name of the assembly's resource that holds it.
@@ -62,24 +61,24 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
     public void Dispose() => _shader.Dispose();
 
     /// <summary>
-    /// Records the lines of <see cref="RenderGraph.Failures"/> over the window's image.
+    /// Records the lines of <see cref="RenderFrame.Failures"/> over the window's image.
     /// </summary>
     /// <remarks>
     /// It asks for the shaders every frame, so they are built before the first failure. While they are not built, or
     /// the banner's buffers are not made, it draws nothing and tells no failure, as no banner would show it.
     /// </remarks>
-    public void Record(RenderGraph graph, in Frame frame)
+    public void Record(RenderGraph graph, in RenderFrame frame)
     {
-        if (graph.GetState(_shaders.Vertex, _shaders.Pixel) != GpuState.Ready)
+        if (gpu.GetState(_shaders.Vertex, _shaders.Pixel) != GpuState.Ready)
             return;
 
-        ReadOnlySpan<(RenderFailure Kind, string What)> failures = graph.Failures;
-        GpuTexture target = graph.WindowTarget;
+        ReadOnlySpan<(RenderFailure Kind, string What)> failures = frame.Failures;
+        GpuTexture target = gpu.WindowTarget;
         if (failures.IsEmpty || target.IsNone)
             return;
 
-        Result<GpuBuffer> lines = graph.Buffer(new("Failure banner", (MaxLines + 1) * LineWords * sizeof(uint)));
-        Result<GpuBuffer> indices = graph.Buffer(new("Failure banner indices", 3 * sizeof(uint), BufferUsages.Index));
+        Result<GpuBuffer> lines = gpu.GetBuffer(new("Failure banner", (MaxLines + 1) * LineWords * sizeof(uint)));
+        Result<GpuBuffer> indices = gpu.GetBuffer(new("Failure banner indices", 3 * sizeof(uint), BufferUsages.Index));
         if (!lines.Ok || !indices.Ok)
             return;
 
@@ -122,7 +121,7 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
         if (!graph.Upload<uint>(indices.Value, [0, 1, 2]))
             return;
 
-        TextureDescription window = graph.GetDescription(target);
+        TextureDescription window = gpu.GetDescription(target);
         Rectangle drawn =
             post < 0
                 ? new Rectangle(0, 0, window.Width, Math.Min(count * LinePixels, window.Height))

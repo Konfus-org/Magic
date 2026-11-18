@@ -7,7 +7,6 @@ using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.GlobalIllumination;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -54,6 +53,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
     );
 
     private readonly TracedReflectionsSettings _settings;
+    private readonly IGraphicsApi _gpu;
     private readonly GlobalIlluminationSettings _indirect;
 
     /// <summary>
@@ -98,6 +98,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
     )
     {
         _settings = settings;
+        _gpu = gpu;
         _indirect = indirect;
         _settling = new SettleWait(threads);
         _traceShader = PassShaders.GetEntry(assets, "TraceReflections", "TraceReflections");
@@ -111,17 +112,17 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
     }
 
     /// <summary>
-    /// Traces the reflections of the graph's view and writes their id into the view's frame buffer.
+    /// Traces the reflections of the frame's view and writes their id into the view's frame buffer.
     /// </summary>
     /// <returns>
     /// The view's reflections, or none while they are off, the indirect light is not traced, the shaders build, or
     /// what they read and write is not made. With none, the surfaces reflect the sky, or their diffuse light where it
     /// is traced.
     /// </returns>
-    public Reflections? Render(in Frame frame, RenderGraph graph, in TracedReflectionsInput input)
+    public Reflections? Render(in RenderFrame frame, RenderGraph graph, in TracedReflectionsInput input)
     {
         // What the view keeps from frame to frame, by its number.
-        while (_reflected.Count <= graph.View)
+        while (_reflected.Count <= frame.View)
         {
             _reflected.Add(default);
         }
@@ -131,7 +132,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         {
             _built.TrySetResult();
             _settling.End();
-            _reflected[graph.View] = default;
+            _reflected[frame.View] = default;
 
             return null;
         }
@@ -140,7 +141,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         // Otherwise the view is still loading, and the domain keeps waiting for the passes.
         if (input.View is not { } gpu)
         {
-            if (graph.IsMakerOut<GpuView>())
+            if (frame.IsUnavailable<GpuView>())
             {
                 _built.TrySetResult();
                 _settling.End();
@@ -155,18 +156,18 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         if (input.Traced is not { } traced)
         {
             _built.TrySetResult();
-            if (!graph.Features.HasRayQuery || graph.IsMakerOut<TracedWorld>())
+            if (!_gpu.Features.HasRayQuery || frame.IsUnavailable<TracedWorld>())
                 _settling.End();
 
-            _reflected[graph.View] = default;
+            _reflected[frame.View] = default;
 
             return null;
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
         // The trace on the sky's type and on the open sky are both built, as a domain's frames take either.
-        GpuState shaders = graph.GetState(_traceShader with { TypeArguments = _openSky }, _resolveShader, _blendShader);
-        GpuState skyShader = graph.GetState(_traceShader with { TypeArguments = input.Sky?.SkyType ?? _openSky });
+        GpuState shaders = _gpu.GetState(_traceShader with { TypeArguments = _openSky }, _resolveShader, _blendShader);
+        GpuState skyShader = _gpu.GetState(_traceShader with { TypeArguments = input.Sky?.SkyType ?? _openSky });
         if (skyShader != GpuState.Ready && shaders != GpuState.Failed)
             shaders = skyShader;
 
@@ -176,7 +177,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         if (shaders == GpuState.Failed)
         {
             _settling.End();
-            graph.Fail(
+            frame.Fail(
                 RenderFailure.Shader,
                 "Reflections are not traced",
                 "a shader of the reflections was not built."
@@ -191,45 +192,50 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         // where it is off, its maker is out or rays see no instance, which ends the settling.
         if (input.Light is not { } light)
         {
-            if (!_indirect.IsIndirectLightOn || graph.IsMakerOut<IndirectLight>() || traced.Structure.IsNone)
+            if (!_indirect.IsIndirectLightOn || frame.IsUnavailable<IndirectLight>() || traced.Structure.IsNone)
                 _settling.End();
 
-            _reflected[graph.View] = default;
+            _reflected[frame.View] = default;
 
             return null;
         }
 
-        Result<GpuBuffer> constants = graph.Buffer(new("Reflection constants", Unsafe.SizeOf<ReflectionConstants>()));
+        Result<GpuBuffer> constants = _gpu.GetBuffer(
+            new("Reflection constants", Unsafe.SizeOf<ReflectionConstants>()),
+            frame.View
+        );
         (int Width, int Height) tracedSize = gpu.Scaled(_indirect.IndirectScale);
 
         // A view that lost its history at the same size draws another world: its history starts afresh at that
         // world's first frame.
-        if (!gpu.HasHistory && _reflected[graph.View].Traced == tracedSize)
-            _reflected[graph.View] = default;
+        if (!gpu.HasHistory && _reflected[frame.View].Traced == tracedSize)
+            _reflected[frame.View] = default;
 
-        ((int Width, int Height)? lastTraced, int lastFrames) = _reflected[graph.View];
+        ((int Width, int Height)? lastTraced, int lastFrames) = _reflected[frame.View];
         int frames = lastTraced == tracedSize ? lastFrames + 1 : 1;
         GIView view = new(
             graph,
+            frame.View,
             gpu,
             constants.Value,
             tracedSize,
             GIView.GetWorld(gpu, traced, input.Sky),
             SkyTables.GetSkyType(input.Sky, _openSky)
         );
-        Result<TracedReflectionConstants> reflections = Prepare(view, frame.Index, lastTraced == tracedSize);
+        Result<TracedReflectionConstants> reflections = Prepare(_gpu, view, frame.Index, lastTraced == tracedSize);
         int written = (int)(frame.Index % 2);
-        Result<GpuTexture> depthHistory = graph.Texture(
-            view.GetTraced(GIView.DepthNames[1 - written], GIView.DepthFormat)
+        Result<GpuTexture> depthHistory = _gpu.GetTexture(
+            view.GetTraced(GIView.DepthNames[1 - written], GIView.DepthFormat),
+            frame.View
         );
-        Result<GpuSampler> sampler = graph.Sampler(
+        Result<GpuSampler> sampler = _gpu.GetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         Result asked = Result.FindFailure(constants, reflections, depthHistory, sampler);
         if (!asked.Ok)
         {
             _settling.End();
-            graph.Fail(RenderFailure.Resource, "Reflections are not traced", asked.Error);
+            frame.Fail(RenderFailure.Resource, "Reflections are not traced", asked.Error);
 
             return null;
         }
@@ -259,8 +265,8 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
             return null;
 
         Record(view, light, reflection);
-        _reflected[graph.View] = (tracedSize, frames);
-        if (graph.View == 0 && frames >= SettleFrames)
+        _reflected[frame.View] = (tracedSize, frames);
+        if (frame.View == 0 && frames >= SettleFrames)
             _settling.End();
 
         return new Reflections(blended);
@@ -284,16 +290,31 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
     /// <remarks>
     /// The blended light is the indirect specular light that shading reads.
     /// </remarks>
-    private static Result<TracedReflectionConstants> Prepare(in GIView view, uint frameIndex, bool hasHistory)
+    private static Result<TracedReflectionConstants> Prepare(
+        IGraphicsApi gpu,
+        in GIView view,
+        uint frameIndex,
+        bool hasHistory
+    )
     {
         RenderGraph graph = view.Graph;
-        Result<GpuTexture> traced = graph.Texture(view.GetTraced("Traced reflections", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> rays = graph.Texture(view.GetTraced("Reflection rays", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> resolved = graph.Texture(
-            view.GetTraced("Resolved reflections", GpuFormat.R16G16B16A16Sfloat)
+        Result<GpuTexture> traced = gpu.GetTexture(
+            view.GetTraced("Traced reflections", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
         );
-        Result<GpuTexture> distance = graph.Texture(view.GetTraced("Reflection distance", GpuFormat.R32Sfloat));
-        Result<TracedBlendConstants> blend = TracedBlend.Prepare(view, _blendNames, frameIndex, hasHistory);
+        Result<GpuTexture> rays = gpu.GetTexture(
+            view.GetTraced("Reflection rays", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
+        Result<GpuTexture> resolved = gpu.GetTexture(
+            view.GetTraced("Resolved reflections", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
+        Result<GpuTexture> distance = gpu.GetTexture(
+            view.GetTraced("Reflection distance", GpuFormat.R32Sfloat),
+            view.Index
+        );
+        Result<TracedBlendConstants> blend = TracedBlend.Prepare(gpu, view, _blendNames, frameIndex, hasHistory);
         if (Result.FindFailure(traced, rays, resolved, distance, blend) is { Ok: false } failed)
             return Result.Failure(failed.Error);
 

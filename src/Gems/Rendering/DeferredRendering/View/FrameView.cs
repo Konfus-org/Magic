@@ -3,7 +3,6 @@ using Magic.Assets;
 using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.DeferredRendering.View;
@@ -15,7 +14,7 @@ namespace Magic.DeferredRendering.View;
 /// <remarks>
 /// It remembers last frame's view, so a thing that moved carries where it was.
 /// </remarks>
-internal sealed class FrameView
+internal sealed class FrameView(IGraphicsApi gpu)
 {
     private const uint JitterFrames = 256;
 
@@ -67,7 +66,7 @@ internal sealed class FrameView
         in GpuView view,
         in GpuWorld world,
         (Transform Transform, Camera Camera) camera,
-        in Frame frame,
+        in RenderFrame frame,
         Vector2 jitter,
         float mipBias,
         (Vector3 Direction, Vector3 Illuminance) sun,
@@ -75,7 +74,7 @@ internal sealed class FrameView
         GpuTracedWorld traced
     )
     {
-        Result<GpuSampler> sampler = graph.Sampler(
+        Result<GpuSampler> sampler = gpu.GetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)

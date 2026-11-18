@@ -1,5 +1,3 @@
-using Magic.Projects;
-
 namespace Magic.Graphics;
 
 /// <summary>
@@ -16,7 +14,7 @@ namespace Magic.Graphics;
 /// step implements a form for each.
 /// </para>
 /// <para>
-/// Tell <see cref="RenderGraph.Fail"/> what cannot be recorded, and go on. A step that throws fails the frame, and
+/// Tell <see cref="RenderFrame.Fail"/> what cannot be recorded, and go on. A step that throws fails the frame, and
 /// Core runs it again after a pause.
 /// </para>
 /// </remarks>
@@ -25,7 +23,7 @@ public interface IRender
     /// <summary>
     /// Records the gem's passes into <paramref name="graph"/>, each in its <see cref="RenderStage"/>.
     /// </summary>
-    void Render(in Frame frame, RenderGraph graph);
+    void Render(in RenderFrame frame, RenderGraph graph);
 }
 
 /// <summary>
@@ -45,7 +43,7 @@ public interface IRenderFrom<TInput>
     /// Records the gem's passes into <paramref name="graph"/>. Core does not call it in a frame that lacks a
     /// non-nullable input.
     /// </summary>
-    void Render(in Frame frame, RenderGraph graph, in TInput input);
+    void Render(in RenderFrame frame, RenderGraph graph, in TInput input);
 }
 
 /// <summary>
@@ -66,7 +64,7 @@ public interface IRenderInto<TOutput>
     /// <remarks>
     /// Return null when it made nothing. Then no gem that needs it renders this frame.
     /// </remarks>
-    TOutput? Render(in Frame frame, RenderGraph graph);
+    TOutput? Render(in RenderFrame frame, RenderGraph graph);
 }
 
 /// <summary>
@@ -85,13 +83,13 @@ public interface IRender<TInput, TOutput>
     /// Return null when it made nothing. Then no gem that needs it renders this frame. Core does not call it in a frame
     /// that lacks a non-nullable input.
     /// </remarks>
-    TOutput? Render(in Frame frame, RenderGraph graph, in TInput input);
+    TOutput? Render(in RenderFrame frame, RenderGraph graph, in TInput input);
 }
 
 /// <summary>
 /// How many views the frame draws: each a camera drawn into a part of the window or into a render texture. One step
 /// makes it, once a frame. Each step that takes it, and each step that takes what such a step made, runs once for each
-/// view, in the views' order, and tells its view by <see cref="RenderGraph.View"/>. Every other step runs once a frame.
+/// view, in the views' order, and tells its view by <see cref="RenderFrame.View"/>. Every other step runs once a frame.
 /// A frame in which no step makes it has one view.
 /// </summary>
 public readonly record struct RenderViews(int Count);

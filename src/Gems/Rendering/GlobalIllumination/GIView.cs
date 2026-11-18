@@ -15,6 +15,7 @@ namespace Magic.GlobalIllumination;
 /// </remarks>
 public readonly record struct GIView(
     RenderGraph Graph,
+    int Index,
     GpuView Gpu,
     GpuBuffer Constants,
     (int Width, int Height) TracedSize,

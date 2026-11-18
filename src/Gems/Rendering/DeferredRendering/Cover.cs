@@ -14,7 +14,7 @@ namespace Magic.DeferredRendering;
 /// It draws after the views' output and before the overlay stage, so the debug UI and the failure banner show over it.
 /// It draws nothing at an opacity of 0, with no window, or while its shaders are not built. Render thread.
 /// </remarks>
-internal sealed class Cover(AssetManager assets)
+internal sealed class Cover(AssetManager assets, IGraphicsApi gpu)
 {
     /// <summary>
     /// The stage of the cover: after <see cref="RenderStages.Post"/>, before <see cref="RenderStage.Overlay"/>.
@@ -64,7 +64,7 @@ internal sealed class Cover(AssetManager assets)
     /// <summary>
     /// Gets whether a shader of the cover is still being built; a failed one counts as done.
     /// </summary>
-    public bool IsLoading(RenderGraph graph) => graph.IsAnyLoading(_shaders.Vertex, _shaders.Pixel);
+    public bool IsLoading() => gpu.IsAnyLoading(_shaders.Vertex, _shaders.Pixel);
 
     /// <summary>
     /// Records the cover over the window at <paramref name="opacity"/>, which the shader makes even to the eye.
@@ -72,17 +72,17 @@ internal sealed class Cover(AssetManager assets)
     /// <remarks>
     /// It asks for its shaders each frame, at any opacity, so they are built before the first fade.
     /// </remarks>
-    public void Record(RenderGraph graph, float opacity)
+    public void Record(in RenderFrame frame, RenderGraph graph, float opacity)
     {
-        GpuState shaders = graph.GetState(_shaders.Vertex, _shaders.Pixel);
+        GpuState shaders = gpu.GetState(_shaders.Vertex, _shaders.Pixel);
         if (shaders == GpuState.Failed)
-            graph.Fail(RenderFailure.Shader, "The load is not covered", "a shader of the cover was not built.");
+            frame.Fail(RenderFailure.Shader, "The load is not covered", "a shader of the cover was not built.");
 
-        GpuTexture target = graph.WindowTarget;
+        GpuTexture target = gpu.WindowTarget;
         if (opacity <= 0 || target.IsNone || shaders != GpuState.Ready)
             return;
 
-        Result<GpuBuffer> indices = graph.Buffer(new("Cover indices", 3 * sizeof(uint), BufferUsages.Index));
+        Result<GpuBuffer> indices = gpu.GetBuffer(new("Cover indices", 3 * sizeof(uint), BufferUsages.Index));
         if (!indices.Ok || !graph.Upload<uint>(indices.Value, [0, 1, 2]))
             return;
 
@@ -92,7 +92,7 @@ internal sealed class Cover(AssetManager assets)
             BitConverter.SingleToUInt32Bits(_color.Z),
             BitConverter.SingleToUInt32Bits(Math.Min(opacity, 1))
         );
-        TextureDescription window = graph.GetDescription(target);
+        TextureDescription window = gpu.GetDescription(target);
         IndexedDraw draw = new()
         {
             Scissor = new Rectangle(0, 0, window.Width, window.Height),

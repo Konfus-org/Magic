@@ -1,7 +1,7 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// What failed in a frame, as told to <see cref="RenderGraph.Fail"/>. The frame goes on without it.
+/// What failed in a frame, as told to <see cref="RenderFrame.Fail"/>. The frame goes on without it.
 /// </summary>
 public enum RenderFailure : byte
 {

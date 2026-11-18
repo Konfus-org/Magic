@@ -74,7 +74,7 @@ things:
 - Core runs each gem after the gems whose output it takes. Gems pass what they draw to one another in this way, as
   data. They never pass it through a gem in a constructor.
 - A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. It keeps
-  what it holds for a view by `RenderGraph.View`.
+  what it holds for a view by `RenderFrame.View`.
 - `EntryPoint.LateUpdate` calls a method of `Renderer` that publishes what `Render` draws, as data. `Renderer` owns
   the hand-off. The newest value goes through a `Mailbox<T>`, and what must not be lost goes through a `Channel<T>`.
 - `Render` reads the gem's settings directly. Core writes them one member at a time, so a frame can see one old
@@ -149,7 +149,7 @@ things:
 - Return a `Result` for anything that content or the machine can break: I/O, import, compile, readback.
 - Broken content logs `Log.Error` and shows a visible stand-in. It never stops the frame. What still works, but
   worse, logs `Log.Warn`.
-- A step of `Render` that can't draw tells `RenderGraph.Fail`, returns for this frame and tries again in the next. It
+- A step of `Render` that can't draw tells `RenderFrame.Fail`, returns for this frame and tries again in the next. It
   never logs the failure itself and never stops for the run ([Failures](DEBUGGING.md#report-a-failure-from-a-gem)).
 - Throw only for a programmer's mistake or a gem that can't exist (no GPU): `ArgumentException`,
   `InvalidOperationException` or `NotSupportedException`, never `Exception` itself. Use the throw helpers

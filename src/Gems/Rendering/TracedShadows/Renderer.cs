@@ -6,7 +6,6 @@ using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -78,6 +77,8 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
 
     private readonly TracedShadowsSettings _settings;
 
+    private readonly IGraphicsApi _gpu;
+
     private readonly ShaderEntry _traceShader;
 
     private readonly ShaderEntry _classifyShader;
@@ -104,10 +105,11 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// </summary>
     private readonly SettleWait _settling;
 
-    internal Renderer(TracedShadowsSettings settings, AssetManager assets, Threads threads)
+    internal Renderer(TracedShadowsSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _settling = new SettleWait(threads);
         _settings = settings;
+        _gpu = gpu;
         _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
         _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
         _filterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterShadows");
@@ -123,7 +125,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// <returns>
     /// The frame's shadows, or none while they are off, the passes' shaders build, or what they write is not made.
     /// </returns>
-    public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
+    public ShadowMask? Render(in RenderFrame frame, RenderGraph graph, in TracedInput input)
     {
         // Off, each view's history starts afresh once it is back on.
         if (!_settings.IsTracedShadowsOn)
@@ -134,7 +136,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each.
-        GpuState state = graph.GetState(
+        GpuState state = _gpu.GetState(
             _traceShader,
             _classifyShader,
             _filterShader,
@@ -146,7 +148,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         if (state == GpuState.Failed)
         {
             _settling.End();
-            graph.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
+            frame.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
         }
 
         if (state != GpuState.Ready)
@@ -158,6 +160,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         // traced mask is the filtered one.
         GpuView view = input.View;
         (int width, int height) = view.Scaled(_settings.ShadowScale);
+        int viewIndex = frame.View;
         long tiles = (long)((width + SunTileWidth - 1) / SunTileWidth) * ((height + SunTileHeight - 1) / SunTileHeight);
         long maskBytes = (long)width * height * BytesPerPixel;
         long groups =
@@ -168,17 +171,23 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             * ((view.Height + LightTileSize - 1) / LightTileSize)
             * LightBuckets;
         int written = (int)(frame.Index % 2);
-        Result<GpuBuffer> constants = graph.Buffer(
-            new("Shadow denoiser constants", Unsafe.SizeOf<ShadowDenoiseConstants>())
+        Result<GpuBuffer> constants = _gpu.GetBuffer(
+            new("Shadow denoiser constants", Unsafe.SizeOf<ShadowDenoiseConstants>()),
+            frame.View
         );
-        Result<GpuBuffer> tileStates = graph.Buffer(new("Shadow tile states", groups * sizeof(uint)));
-        Result<GpuBuffer> blueNoise = graph.Buffer(new("Blue noise", _blueNoise.Length * sizeof(float)));
-        Result<GpuBuffer> sunTiles = graph.Buffer(new("Sun shadow tiles", tiles * sizeof(uint)));
-        Result<GpuBuffer> tracedMask = graph.Buffer(new("Traced shadow mask", maskBytes));
+        Result<GpuBuffer> tileStates = _gpu.GetBuffer(new("Shadow tile states", groups * sizeof(uint)), frame.View);
+        Result<GpuBuffer> blueNoise = _gpu.GetBuffer(new("Blue noise", _blueNoise.Length * sizeof(float)), frame.View);
+        Result<GpuBuffer> sunTiles = _gpu.GetBuffer(new("Sun shadow tiles", tiles * sizeof(uint)), frame.View);
+        Result<GpuBuffer> tracedMask = _gpu.GetBuffer(new("Traced shadow mask", maskBytes), frame.View);
         bool hasTileLights = view.LightCount > 0;
-        Result<GpuBuffer> filteredMask = hasTileLights ? graph.Buffer(new(_maskNames[written], maskBytes)) : tracedMask;
-        Result<GpuBuffer> previousMask = graph.Buffer(new(_maskNames[1 - written], maskBytes));
-        Result<GpuBuffer> lastLightTiles = graph.Buffer(new("Last light tiles", lightTileWords * sizeof(uint)));
+        Result<GpuBuffer> filteredMask = hasTileLights
+            ? _gpu.GetBuffer(new(_maskNames[written], maskBytes), frame.View)
+            : tracedMask;
+        Result<GpuBuffer> previousMask = _gpu.GetBuffer(new(_maskNames[1 - written], maskBytes), frame.View);
+        Result<GpuBuffer> lastLightTiles = _gpu.GetBuffer(
+            new("Last light tiles", lightTileWords * sizeof(uint)),
+            frame.View
+        );
         // Without glass, which the view has targets for only while a material draws translucent, the sun's light stays
         // white, so no tint is asked for and the graph frees the last one's.
         bool hasGlass = !view.GlassDepth.IsNone;
@@ -195,11 +204,11 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         bool isPictureSize = (width, height) == (view.Width, view.Height);
         Result<GpuBuffer> mask = isPictureSize
             ? filteredMask
-            : graph.Buffer(new("Shadow mask", (long)view.Width * view.Height * BytesPerPixel));
+            : _gpu.GetBuffer(new("Shadow mask", (long)view.Width * view.Height * BytesPerPixel), frame.View);
         Result<GpuTexture> sunTint =
             isPictureSize || !hasGlass
                 ? tracedTint
-                : graph.Texture(new("Sun tint", view.Width, view.Height, GpuFormat.R16G16B16A16Sfloat));
+                : _gpu.GetTexture(new("Sun tint", view.Width, view.Height, GpuFormat.R16G16B16A16Sfloat), frame.View);
         Result asked = Result.FindFailure(
             constants,
             tileStates,
@@ -222,21 +231,21 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         if (!asked.Ok)
         {
             _settling.End();
-            graph.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
+            frame.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
 
             return null;
         }
 
         // Last frame's mask and moments of this view are this frame's history, at the same size only.
-        while (_traced.Count <= graph.View)
+        while (_traced.Count <= frame.View)
         {
             _traced.Add(default);
         }
 
-        (int lastWidth, int lastHeight, int blended) = _traced[graph.View];
+        (int lastWidth, int lastHeight, int blended) = _traced[frame.View];
         bool hasHistory = view.HasHistory && (lastWidth, lastHeight) == (width, height);
         blended = hasHistory ? blended + 1 : 0;
-        _traced[graph.View] = (width, height, blended);
+        _traced[frame.View] = (width, height, blended);
         if (blended >= SettleFrames)
             _settling.End();
 
@@ -398,19 +407,19 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         return new ShadowMask(mask.Value, sunTint.Value);
 
         Result<GpuTexture> GetTracedTexture(string name, GpuFormat format) =>
-            graph.Texture(new(name, width, height, format));
+            _gpu.GetTexture(new(name, width, height, format), viewIndex);
     }
 
     /// <summary>
     /// Asks for every shader of the shadows each frame while they are on and rays are traced, so each is built or
     /// failed before a domain shows. Ends the wait for the shadows to settle while they cannot trace.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
+    public void Render(in RenderFrame frame, RenderGraph graph)
     {
         if (
             !_settings.IsTracedShadowsOn
-            || !graph.Features.HasRayQuery
-            || !graph.IsAnyLoading(
+            || !_gpu.Features.HasRayQuery
+            || !_gpu.IsAnyLoading(
                 _traceShader,
                 _classifyShader,
                 _filterShader,
@@ -426,9 +435,9 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         // told.
         if (
             !_settings.IsTracedShadowsOn
-            || !graph.Features.HasRayQuery
-            || graph.IsMakerOut<GpuView>()
-            || graph.IsMakerOut<TracedWorld>()
+            || !_gpu.Features.HasRayQuery
+            || frame.IsUnavailable<GpuView>()
+            || frame.IsUnavailable<TracedWorld>()
         )
             _settling.End();
     }

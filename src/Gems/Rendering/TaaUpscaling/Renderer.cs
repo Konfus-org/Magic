@@ -6,7 +6,6 @@ using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -45,6 +44,8 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 
     private readonly TaaUpscalingSettings _settings;
 
+    private readonly IGraphicsApi _gpu;
+
     /// <summary>
     /// The one upscaling every frame makes, so a frame makes no delegate.
     /// </summary>
@@ -62,9 +63,10 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// </summary>
     private readonly SettleWait _settling;
 
-    internal Renderer(TaaUpscalingSettings settings, AssetManager assets, Threads threads)
+    internal Renderer(TaaUpscalingSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _settings = settings;
+        _gpu = gpu;
         _settling = new SettleWait(threads);
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _sharpenShader = PassShaders.GetEntry(assets, "TaaUpscaling", "SharpenPicture");
@@ -74,20 +76,20 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// <summary>
     /// Makes the frame's upscaling; none while a shader builds or after one failed.
     /// </summary>
-    public Upscaling? Render(in Frame frame, RenderGraph graph)
+    public Upscaling? Render(in RenderFrame frame, RenderGraph graph)
     {
-        GpuState state = graph.GetState(_shader);
+        GpuState state = _gpu.GetState(_shader);
         if (state == GpuState.Ready)
-            state = graph.GetState(_sharpenShader);
+            state = _gpu.GetState(_sharpenShader);
 
         if (state == GpuState.Failed)
-            graph.Fail(RenderFailure.Shader, "Picture is not upscaled", "the upscaling's shader was not built.");
+            frame.Fail(RenderFailure.Shader, "Picture is not upscaled", "the upscaling's shader was not built.");
 
         if (state != GpuState.Loading)
             _built.TrySetResult();
 
         // A view maker that is out leaves the upscaling no view to resolve for good: the failure is already told.
-        if (state != GpuState.Ready || graph.IsMakerOut<GpuView>())
+        if (state != GpuState.Ready || frame.IsUnavailable<GpuView>())
             _settling.End();
 
         return state == GpuState.Ready ? _upscaling : null;
@@ -115,36 +117,39 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// Records the pass that resolves the view's output at the size it is shown at.
     /// </summary>
     /// <returns>The picture it resolves; none when its pictures were not made.</returns>
-    private GpuTexture Record(RenderGraph graph, GpuView view)
+    private GpuTexture Record(RenderFrame frame, RenderGraph graph, GpuView view)
     {
         (int width, int height) = (view.ShownWidth, view.ShownHeight);
-        Result<GpuTexture> first = graph.Texture(GetResolved("Resolved picture", width, height));
-        Result<GpuTexture> second = graph.Texture(GetResolved("Other resolved picture", width, height));
-        Result<GpuSampler> sampler = graph.Sampler(
+        Result<GpuTexture> first = _gpu.GetTexture(GetResolved("Resolved picture", width, height), frame.View);
+        Result<GpuTexture> second = _gpu.GetTexture(GetResolved("Other resolved picture", width, height), frame.View);
+        Result<GpuSampler> sampler = _gpu.GetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        Result<GpuBuffer> constants = graph.Buffer(new("Upscale constants", Unsafe.SizeOf<UpscaleConstants>()));
+        Result<GpuBuffer> constants = _gpu.GetBuffer(
+            new("Upscale constants", Unsafe.SizeOf<UpscaleConstants>()),
+            frame.View
+        );
         if (Result.FindFailure(first, second, sampler, constants) is { Ok: false } failed)
         {
             _settling.End();
-            graph.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
+            frame.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
 
             return GpuTexture.None;
         }
 
         // Last frame's resolved picture is this frame's history, where last frame drew this view at this size; the
         // shader reads none where the history it is handed is the picture it resolves.
-        while (_resolved.Count <= graph.View)
+        while (_resolved.Count <= frame.View)
         {
             _resolved.Add(default);
         }
 
-        (GpuTexture lastPicture, int lastWidth, int lastHeight, int blended) = _resolved[graph.View];
+        (GpuTexture lastPicture, int lastWidth, int lastHeight, int blended) = _resolved[frame.View];
         (GpuTexture history, GpuTexture resolved) =
             lastPicture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
         bool hasHistory = view.HasHistory && (lastPicture, lastWidth, lastHeight) == (history, width, height);
         blended = hasHistory ? blended + 1 : 0;
-        _resolved[graph.View] = (resolved, width, height, blended);
+        _resolved[frame.View] = (resolved, width, height, blended);
         if (blended >= SettleFrames)
             _settling.End();
 
@@ -169,7 +174,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
             .Writes(resolved)
             .DispatchOver(width, height);
 
-        return Sharpen(graph, view, resolved, width, height);
+        return Sharpen(frame, graph, view, resolved, width, height);
     }
 
     /// <summary>
@@ -177,13 +182,20 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// the history, so the sharpening and the dither never add up over frames.
     /// </summary>
     /// <returns>The sharpened picture; the resolved one when the picture was not made.</returns>
-    private GpuTexture Sharpen(RenderGraph graph, GpuView view, GpuTexture resolved, int width, int height)
+    private GpuTexture Sharpen(
+        in RenderFrame frame,
+        RenderGraph graph,
+        GpuView view,
+        GpuTexture resolved,
+        int width,
+        int height
+    )
     {
         float sharpness = Math.Clamp(_settings.Sharpness, 0f, 1f);
-        Result<GpuTexture> sharpened = graph.Texture(GetResolved("Sharpened picture", width, height));
+        Result<GpuTexture> sharpened = _gpu.GetTexture(GetResolved("Sharpened picture", width, height), frame.View);
         if (!sharpened.Ok)
         {
-            graph.Fail(RenderFailure.Resource, "Picture is not sharpened", sharpened.Error);
+            frame.Fail(RenderFailure.Resource, "Picture is not sharpened", sharpened.Error);
 
             return resolved;
         }
