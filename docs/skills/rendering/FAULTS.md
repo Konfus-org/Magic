@@ -21,7 +21,7 @@ switches are in the Rendering part of [PROJECT.md](../PROJECT.md).
 | [Light leak](#light-leak) | Pale light on a seam, a corner, a wall's foot or a reveal | The `leak at <point>` rows of the sealed room, the ratio map, the inside views at night | **Automatic fail.** Any light through a wall, a roof or a seam fails the picture |
 | [Too dark or too bright inside](#too-dark-or-too-bright-inside) | A room that is flat, grey, dim or glowing | The patch ratio rows of an inside view at each hour | A median outside 0.9 to 1.1 fails |
 | [Too dark or too bright outside](#too-dark-or-too-bright-outside) | A night that reads like dusk, or a blown-out day | The patch ratio rows of an outside view at each hour | A median outside 0.9 to 1.1 fails |
-| [The wrong light for the hour](#the-wrong-light-for-the-hour) | Daylight at night, a morning that looks like noon | `query sky` and `BuildScene.py --light`, the ratio at each hour | A sun height, colour or lux that does not fit the hour fails |
+| [The wrong light for the hour](#the-wrong-light-for-the-hour) | Daylight at night, a morning that looks like noon | `query DeferredRendering.Sun`, the ratio at each hour | A sun height, colour or lux that does not fit the hour fails |
 | [The indoor to outdoor ratio](#the-indoor-to-outdoor-ratio) | A room too bright or too dark against the view through its window | The patch ratio median of the inside view over the outside view's at the same hour | A ratio more than 1.2 times the reference's fails |
 | [Light or shadows that do not fit a room](#light-or-shadows-that-do-not-fit-a-room) | No sun patch, no soft shadow under furniture, even light | The inside views against Cycles, the switches, the ratio map | A missing or wrong-shaped sun patch, or no contact darkening, fails |
 | [Wrong colour](#wrong-colour) | A room too orange, a night too blue | The colour of each named point | r/g or b/g more than 5 % from the reference fails |
@@ -111,8 +111,7 @@ still and in motion.
   Magic's night is about six times too bright. At hour 12 the same view is 0.919, so the day is near the bar and
   the night is not. The snow and the ground through the doorway blow out to white at noon.
 - **Test:** the patch ratio median of `cabin-outside` and `cabin-trees` at each hour. Check the light against real
-  values
-  with `BuildScene.py --light`:
+  values with `query DeferredRendering.Sun`:
 
   | Light | Real value |
   | --- | --- |
@@ -136,10 +135,9 @@ still and in motion.
   the setting `Rendering.SkyBrightness`. A doubled `Brightness` lifts a surface by 3.3, 7.5 and 17.8 % in red,
   green and blue. A doubled setting lifts it by 0.4 %, because that setting scales the sky that the air and the
   clouds take. To change the light that a room gets from the sky, change the component.
-- **Test:** the console commands `set Day.Hour <hour>` and then `query sky` print the sun's and the moon's rotation
-  at the hour, the light that lights the world and each factor of the sky's light. `BuildScene.py --light` reads the
-  same from a run of Magic and prints the lux through the air. Compare the sun's height and azimuth with the hour. Then run the view at that hour and
-  read its median and its colour.
+- **Test:** the console commands `set Day.Hour <hour>` and then `query DeferredRendering.Sun` print the light that
+  lights the world at the hour, and `query ProceduralSky.Brightness` what the sky's light is multiplied by. Compare
+  the sun's height and azimuth with the hour. Then run the view at that hour and read its median and its colour.
 - **Reject rule:** a sun height, a sun colour or a lux value that does not fit the hour fails. Direct sunlight from
   a sun under the horizon fails. A night with the sky of a day fails.
 - **Cause proved:** a `DayCycle` that starts anew begins from the rotation that its light has at that time. So

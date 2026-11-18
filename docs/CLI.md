@@ -48,6 +48,14 @@ A part of a gem can give its properties a path. These values are state of the ru
   read.
 - The shared gem of the samples gives the path `Day`. `set Day.Hour 12` holds the sun of each day cycle at that
   hour, and the moon 12 hours from it.
+- The renderer gives the path `DeferredRendering`. `query DeferredRendering.Sun` prints the light that lights the
+  world, by the rule of the renderer: the direction towards it, its illuminance in lux above the air, and its mode.
+- The sky gem gives the path `ProceduralSky`. `query ProceduralSky.Brightness` prints the factor of the light of
+  the sky.
+
+The sun and the brightness are as the world holds them at the call. To read a different hour, first hold the day
+cycle at it (`set Day.Hour 12`), or set the rotation of each light. The lights are entities: `query domain` and
+`query <tag>.DirectionalLight` print them.
 
 ### The world
 
@@ -65,19 +73,37 @@ A part of a gem can give its properties a path. These values are state of the ru
   - Without a path, it loads every asset.
   - The lines after it wait until it ends. Thus `bake`, then `exit`, fills the caches and stops.
 - `import <file> [folder]` copies a file into the project as an asset, as in `import C:/Art/Bark.png Textures`.
-  - It gives the copy its `.meta` as `new handle` does, and loads the asset one time.
+  - It gives the copy its `.meta`, with the next free id in the folder that it goes in, and loads the asset one
+    time. Thus the ids of a project, of a gem and of Magic stay apart.
   - It prints the id, the path and the type of the asset as JSON.
   - Without a folder, the copy goes into the folder of the project.
   - If a file with that name is there, the import stops. With `--replace`, the import writes over the file, which
     keeps its `.meta` and thus its id.
-- `export <asset> <file>` loads an asset by its path or its id and writes it to a file, as in
+  - A file that the project holds already is not copied. It gets its `.meta` where it is, and a file that has a
+    `.meta` keeps its id.
+  - `--meta <json>` puts import settings into the `.meta` that the import writes, as in
+    `--meta '{"usage":"normal"}'` for a texture. It is an error for a file that is an asset already, and the import
+    stops before it writes anything.
+- `export <asset> [file]` loads an asset by its path or its id and writes it to a file, as in
   `export Textures/Bark.png C:/Art/Bark.png`.
   - The name of the file ends in the extension of the type.
+  - Without a file, it writes the file of the asset itself and keeps its `.meta`, and thus its id. A value that
+    `set` changed goes back into the project in this way.
   - If no gem of the project writes the type, the export fails and gives the reason.
   - The file of a prefab has the handle of each prefab that it places.
   - The file omits a value that holds the default of its type. With `--defaults`, the file has every value.
-- `new handle <file>` gives a `.meta` to a file that has none, with the next free id in the folder of the file.
-  Thus the ids of a project, of a gem and of Magic stay apart. A file that has a `.meta` keeps its id.
+- `new asset <file>` makes a new asset in a folder that the run reads assets from, as in
+  `new asset Materials/Spruce.mat`. The extension gives the type. The file gets the values of the default asset of
+  that type, and its `.meta`. It prints the id, the path and the type of the asset as JSON.
+  - A file that is there already stops it, and the command names the file. Use `set` and `export` to change the
+    asset that stands there.
+- `set <path> <value>` also changes a value of an asset.
+  - The path starts with the path of the asset under its project, its gem or Magic, or with its id. Each next part
+    is a member of the asset, as in `set Materials/Carpet.mat.transparency masked`.
+  - A param of a material has its own name, letter for letter, and is set whole, as in
+    `set 300124.params.color '{"r":0.1,"g":0.2,"b":0.3,"a":1}'`.
+  - Magic loads the asset for the line, and the lines after it wait for the load. `export <asset>` then writes the
+    change into the file of the asset.
 
 ### Queries
 
@@ -85,15 +111,14 @@ A part of a gem can give its properties a path. These values are state of the ru
 JSON to the file.
 
 The subjects are `domain`, `components`, `asset`, `settings`, `stats`, `log`, `world` and `gems`, and each subject
-that a gem adds, such as `sky` and `gpu`. A first word that is not a subject is a path that `set` takes. `query <path>`
+that a gem adds, such as `gpu`. A first word that is not a subject is a path that `set` takes. `query <path>`
 prints the settings of a category or a key, or the value on each entity that the path names.
 
 - `query stats [category]` measures for one second and prints each instrument. With a category, as in
   `query stats gpu`, it prints each instrument with the category in its name. With `--every <seconds>`, it logs
   the instruments at that interval, and `--every 0` stops the log.
 - `query log` prints the path of the log file of the run, and how many warnings and errors the run logged.
-- `query world` prints if the world loads or is paused, how fast its time runs, its domains and how many entities
-  it holds.
+- `query world` prints the domains of the world and how many entities it holds.
 - `query gems` prints each gem that the run started.
 - `query gpu` prints the GPU that draws. The GPU provider adds this subject.
 - `query components` prints each component type that the run knows, from Magic and from each loaded gem. It gives
@@ -124,21 +149,6 @@ These options select the entities:
 - `--names` keeps only the entities whose name starts with one of the names, as in
   `query domain --names ReferenceView Cabin --out world.json`.
 - `--tags` keeps only the entities that hold one of the tags, as in `query domain --tags render-reference`.
-
-#### `query sky`
-
-`query sky` prints three things. The sky gem adds this subject.
-
-1. Each directional light of the world, with its rotation, the direction towards it, its colour and its illuminance
-   in lux above the air.
-2. The light that lights the world, by the rule of the renderer.
-3. Each factor of the light of the sky:
-   - The brightness of the sky entity. It scales the sky that a surface sees.
-   - The setting `Rendering.SkyBrightness`, the tint of the sky and the red of the light. They scale the open sky
-     that the air and the clouds take.
-
-The lights are as the world holds them at the call. To read a different hour, first hold the day cycle at it
-(`set Day.Hour 12`), or set the rotation of each light. Then call `query sky`.
 
 ## Output and exit codes
 

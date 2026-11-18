@@ -15,6 +15,9 @@ the code that builds the scene in Blender. With no option it renders what is mis
 moved on, and leaves the rest. The visual tests never render: they read these files, and stop when one is missing or
 stale (tools/Scripts/VisualTests.ps1).
 
+It builds Magic one time and gives Blender the program of that build (`--magic`), which Blender starts with no window
+for the camera of each view and the light of each hour. The add-on in Blender builds nothing.
+
 The references are large pictures that git keeps with Git LFS. A new clone needs `git lfs install` one time, and the
 checkout step of a CI job needs `lfs: true`.
 
@@ -54,6 +57,7 @@ $ErrorActionPreference = 'Stop'
 
 $scripts = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scripts 'ReferenceLib.ps1')
+. (Join-Path $scripts 'RunLib.ps1')
 
 # A list given to powershell -File comes in as one string of commas, so both lists are split again here.
 $View = @($View | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
@@ -66,6 +70,12 @@ if (-not $Samples) { $Samples = $settings.cycles.samples }
 # reference hold the same pixels.
 $size = @("$($settings.picture.width)", "$($settings.picture.height)")
 $Blender = Get-BlenderPath $Blender
+
+# Magic resolves the camera of each view and answers the light of each hour, so this run needs a built Magic. It is
+# built one time here, and Blender gets the program of that build: nothing in Blender builds.
+& (Join-Path $scripts 'Validate.ps1') -Only Build
+if ($LASTEXITCODE -ne 0) { throw "The build of Magic failed with exit code $LASTEXITCODE." }
+$magic = Get-MagicPath
 
 $views = Get-ReferenceViews $View -CheckTags
 $states = Get-ReferenceStates $views $asked $Samples $size
@@ -124,8 +134,16 @@ foreach ($project in @($jobs.View.project | Sort-Object -Unique)) {
     Remove-Item -Force -ErrorAction Ignore @($here | ForEach-Object {
         $_.Paths.Picture; $_.Paths.Mask; $_.Paths.Preview
     })
-    Invoke-Blender $Blender 'BuildScene.py' @('--jobs', $list, '--samples', $Samples) 14400 |
-        Where-Object { $_ -match '^(built|rendered|rendering on|preview)' } | Write-Output
+    # Blender starts Magic for the light of each hour and for the component types, so the run holds a run slot, as
+    # every script that runs Magic does, and waits for another branch's profiling turn first.
+    & (Join-Path $scripts 'Profiling.ps1') -Wait
+    $slot = & (Join-Path $scripts 'Profiling.ps1') -Slot
+    try {
+        Invoke-Blender $Blender 'BuildScene.py' @('--jobs', $list, '--samples', $Samples, '--magic', $magic) 14400 |
+            Where-Object { $_ -match '^(built|rendered|rendering on|preview)' } | Write-Output
+    } finally {
+        $slot.Dispose()
+    }
 }
 
 foreach ($job in $jobs) {

@@ -127,10 +127,10 @@ public sealed class Renderer
     private readonly DeferredRenderingSettings _settings;
 
     /// <summary>
-    /// The part of the frame to show, which the debug window and the console set on the game thread. The shading step
-    /// reads it on the render thread.
+    /// What the renderer shows and what lights it, which the debug window and the console reach on the game thread.
+    /// The shading step reads the view on the render thread.
     /// </summary>
-    private readonly DebugViewState _debugView;
+    private readonly RendererState _state;
 
     private readonly IEcs _ecs;
 
@@ -238,7 +238,7 @@ public sealed class Renderer
 
     internal Renderer(
         DeferredRenderingSettings settings,
-        DebugViewState debugView,
+        RendererState state,
         IShaderCompiler shaders,
         IGraphicsApi gpu,
         AssetManager assets,
@@ -250,7 +250,7 @@ public sealed class Renderer
     )
     {
         _settings = settings;
-        _debugView = debugView;
+        _state = state;
         _ecs = ecs;
         _world = world;
         _assets = assets;
@@ -785,7 +785,7 @@ public sealed class Renderer
             return null;
 
         GpuView gpu = input.View;
-        DebugView renderView = _debugView.RenderView;
+        DebugView renderView = _state.RenderView;
         TextureFilter upscaleFilter = _settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
@@ -903,7 +903,7 @@ public sealed class Renderer
                 new GpuConstants(
                     gpu.Frame.Id,
                     (uint)renderView | (input.Effects is null ? NoEffects : 0),
-                    BitConverter.SingleToUInt32Bits(_debugView.DepthViewFar),
+                    BitConverter.SingleToUInt32Bits(_state.DepthViewFar),
                     BitConverter.SingleToUInt32Bits(Math.Clamp(_settings.Gamma, 0.5f, 2f))
                 ),
                 RenderStages.Post

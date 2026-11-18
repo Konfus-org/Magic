@@ -12,7 +12,8 @@ using Magic.Utils;
 namespace Magic.CommandLine;
 
 /// <summary>
-/// Reads and writes a value of an entity, named by a console path such as <c>player.transform.rotation.y</c>.
+/// Reads and writes a value of an entity, named by a console path such as <c>player.transform.rotation.y</c>, and the
+/// members under any value that such a path names.
 /// </summary>
 /// <remarks>
 /// A path is <c>entity.component.member</c>, to any depth, and <c>entity.component</c> is the whole component. The
@@ -154,6 +155,9 @@ internal static class EntityPaths
         ReadOnlySpan<string> values
     )
     {
+        if (FindEntries(type) is { } entries)
+            return WriteEntry(owner, entries, members, values);
+
         if (FindMember(type, members[0]) is not { } member)
             return Result.Failure($"{type.Name} has no {members[0]}.");
 
@@ -180,6 +184,53 @@ internal static class EntityPaths
             return written;
 
         ValueText.SetMember(member, owner, child);
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The dictionary of values by text keys that <paramref name="type"/> is, whose entries a path names by their
+    /// keys; null when it is none.
+    /// </summary>
+    private static Type? FindEntries(Type type) =>
+        type.GetInterfaces()
+            .FirstOrDefault(face =>
+                face.IsGenericType
+                && face.GetGenericTypeDefinition() == typeof(IDictionary<,>)
+                && face.GenericTypeArguments[0] == typeof(string)
+            );
+
+    /// <summary>
+    /// Writes <paramref name="values"/> at the entry of <paramref name="owner"/>, a dictionary of
+    /// <paramref name="entries"/>, that the first of <paramref name="members"/> names by its key.
+    /// </summary>
+    /// <remarks>
+    /// The key is as the asset's file writes it, letter for letter, and a key the dictionary has not is added. An
+    /// entry is written whole, as a param of a material is a value that nothing changes in its place, so a path that
+    /// names members under an entry is an error.
+    /// </remarks>
+    private static Result WriteEntry(
+        object owner,
+        Type entries,
+        ReadOnlySpan<string> members,
+        ReadOnlySpan<string> values
+    )
+    {
+        if (members.Length > 1)
+        {
+            return Result.Failure(
+                $"{members[0]} of a {entries.Name} is set whole, so leave {string.Join('.', members[1..].ToArray())} out of the path and give the whole value in JSON."
+            );
+        }
+
+        PropertyInfo entry =
+            entries.GetProperty("Item")
+            ?? throw new InvalidOperationException($"{entries.Name} has no entry by a key.");
+        Result<object> parsed = ValueText.Parse(entries.GenericTypeArguments[1], values);
+        if (!parsed.Ok)
+            return Result.Failure($"{parsed.Error} Put the value's JSON in single quotes.");
+
+        entry.SetValue(owner, parsed.Value, [members[0]]);
 
         return Result.Success();
     }

@@ -143,7 +143,8 @@ add-on cannot copy is listed at the top of `tools/Blender/magic_domain/__init__.
 `tools/Reference/BuildScene.py` renders the views: it asks the add-on for the scene, poses the camera at the view,
 sets the hour, sets Cycles and writes a linear HDR EXR of each job, with the mask that keeps the sky out of the
 numbers. It needs no install of the add-on: it puts `tools/Blender` on Python's path and imports the package from
-there.
+there. `--magic` gives it the Magic program that answers the light of each hour and the component types, and it
+builds none.
 
 `tools/Scripts/UpdateReferences.ps1` is the one script that runs Cycles. It renders the reference of each view and
 hour and stores it in the repository ([Tools](TOOLS.md#updatereferencesps1)):

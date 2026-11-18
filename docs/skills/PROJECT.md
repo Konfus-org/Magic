@@ -185,11 +185,9 @@ The sun and the moon take no part of this. Magic's own window shows no grade.
 | The judging and the report page of a run | `tools/Scripts/JudgeVisualTests.ps1 -Run <the folder of a run>`, which `VisualTests.ps1` calls at the end of a run |
 | The comparison of one view | `tools/Scripts/VisualTests.ps1 -View <view> -Hour <hour> -Tier Quick` |
 | Magic's HDR picture | The console command `screenshot --hdr`, through `tools/Scripts/Screenshot.ps1` |
-| The reference scene | `tools/Reference/BuildScene.py`, through Blender, with `--view` and `--hour` |
-| Every reference from one build of the scene | `tools/Reference/BuildScene.py --jobs <list of views and hours>` |
+| The reference scene, every view and hour from one build of it | `tools/Reference/BuildScene.py --jobs <list of views and hours>`, through Blender |
 | Cycles' own settings, by name | `tools/Reference/BuildScene.py --settings <JSON>`, or a `settings` key of a job |
-| The sun and the moon at an hour | The console commands `set Day.Hour <hour>`, then `query sky` |
-| The light at an hour, in lux | `tools/Reference/BuildScene.py --light --hour <hour> --altitude <metres>`, which runs Magic for `query sky` |
+| The light at an hour | The console commands `set Day.Hour <hour>`, then `query DeferredRendering.Sun` |
 | The comparison | `tools/Reference/Compare.py`, through Blender: the ratio map, the split picture, the preview and the metrics |
 | The world point of a pixel | `tools/Reference/Compare.py --view <view> --pose <7 numbers> --pick <x> <y> --depth <screenshot>` |
 | The settle and the edge noise | `tools/Reference/MeasureDenoise.py --moves <list> --out <folder>` |
@@ -206,8 +204,10 @@ A tool or an agent asks Magic what Magic knows. The form of each command, and wh
 | `query domain [--names <name>...] [--tags <tag>...]` | The open domain as the engine resolves it, as one JSON object |
 | `query components` | Each component type that the run knows, with each field's name, type and default, and the same for a material |
 | `query asset <path>`, `query asset --id <id>` | An asset's id, path and type |
-| `new handle <file>` | An id for a file that has none |
-| `query sky` | Each directional light with its rotation, colour and lux, and each factor of the sky's light. The sky gem adds it |
+| `import <file>` | The id, the path and the type of a file as an asset. A file that the project holds already gets its `.meta` where it stands |
+| `new asset <file>` | The id, the path and the type of a new asset file, with the values of Magic's default asset of its type |
+| `query DeferredRendering.Sun` | The light that lights the frame: the direction towards it, its lux above the air and what it is to the sky |
+| `query ProceduralSky.Brightness` | What the sky's light is multiplied by |
 
 A gem adds a subject of `query` or a command of its own through `ConsoleCommands` ([Gems](../GEMS.md)).
 

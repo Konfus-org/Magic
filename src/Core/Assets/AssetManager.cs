@@ -653,28 +653,65 @@ public sealed class AssetManager : IDisposable
         CancellationToken cancel
     )
     {
-        if (!Database.Index.ById.TryGetValue(id, out IndexedFile? indexed))
-            return Result.Failure($"no asset has the id {id}.");
+        Result<AssetType> type = FindType(id);
 
-        if (!Loaded.Types.TryGetValue(indexed.Type, out AssetType? type))
-        {
-            return Result.Failure(
-                $"{indexed.Path} is a {indexed.Type}, which neither Magic nor a gem the project lists holds."
-            );
-        }
-
-        return await type.Export(id, file, includesDefaults, progress, cancel).ConfigureAwait(false);
+        return type.Ok
+            ? await type.Value.Export(id, file, includesDefaults, progress, cancel).ConfigureAwait(false)
+            : Result.Failure(type.Error);
     }
 
     /// <summary>
-    /// Writes the <c>.meta</c> of <paramref name="file"/>, which has none: the next free id of its folder, and the type
-    /// that the other files with its extension have, and reads the asset folders again. A file that is an asset
-    /// already keeps the id it has.
+    /// Loads asset <paramref name="id"/> as the type its <c>.meta</c> names, for a caller that knows the type only as
+    /// the <c>.meta</c> names it, or tells why it could not be loaded.
+    /// </summary>
+    /// <remarks>
+    /// It loads as <see cref="LoadAsync{T}(Handle{T}, IProgress{LoadProgress}, CancellationToken)"/> does, so the
+    /// caller gets the asset that every other caller holds. It is kept while the caller holds it.
+    /// </remarks>
+    internal async Task<Result<object>> LoadAsync(ulong id, IProgress<LoadProgress>? progress, CancellationToken cancel)
+    {
+        Result<AssetType> type = FindType(id);
+        if (!type.Ok)
+            return Result.Failure(type.Error);
+
+        Made made = await RequestAsync(id, 0, type.Value.Type, type.Value.Import, progress, cancel)
+            .ConfigureAwait(false);
+
+        return made.Value;
+    }
+
+    /// <summary>
+    /// Magic's default asset of the type that the extension of <paramref name="file"/> names, which a new asset in that
+    /// file takes its values from, or why there is none.
+    /// </summary>
+    /// <remarks>
+    /// Game thread. <c>new asset</c> writes it to the file, so that the type itself says what a new asset of it holds.
+    /// </remarks>
+    internal Result<IndexedFile> FindDefaultOf(string file)
+    {
+        AssetIndex index = Database.Index;
+        if (GetTypeOf(index, file) is not { } type)
+        {
+            return Result.Failure(
+                $"no asset of this run has the extension of {file}, so the type of a new asset in it is not known."
+            );
+        }
+
+        return index.FindBuiltIn($"{type}s", "Default") is { } found && found.Type == type
+            ? Result.Success(found)
+            : Result.Failure($"there is no default {type}: no {type} is {type}s/Default under {BuiltIn}.");
+    }
+
+    /// <summary>
+    /// Writes the <c>.meta</c> of <paramref name="file"/>, which has none: the next free id of its folder, the type
+    /// that the other files with its extension have, and <paramref name="settings"/> as the import settings of the
+    /// asset, and reads the asset folders again. A file that is an asset already keeps the <c>.meta</c> it has, and
+    /// settings for such a file are an error.
     /// </summary>
     /// <remarks>
     /// Game thread.
     /// </remarks>
-    internal Result<IndexedFile> MakeHandle(string file)
+    internal Result<IndexedFile> MakeHandle(string file, JsonObject settings)
     {
         if (!Files.FileExists(file))
             return Result.Failure($"there is no file at {file}.");
@@ -682,7 +719,14 @@ public sealed class AssetManager : IDisposable
         AssetIndex index = Database.Index;
         string sidecar = file + AssetIndex.Sidecar;
         if (Files.FileExists(sidecar))
-            return ReadSidecar(index, file, sidecar);
+        {
+            return settings.Count == 0
+                ? ReadSidecar(index, file, sidecar)
+                : Result.Failure(
+                    $"{sidecar} holds the import settings of {file} already, and this would write them "
+                        + "again; set them in that .meta."
+                );
+        }
 
         if (GetTypeOf(index, file) is not { } type)
         {
@@ -697,6 +741,9 @@ public sealed class AssetManager : IDisposable
             return Result.Failure(next.Error);
 
         JsonObject meta = new() { ["id"] = next.Value, ["type"] = type };
+        foreach ((string key, JsonNode? value) in settings)
+            meta[key] = value?.DeepClone();
+
         Result written = Files.Write(sidecar, meta.ToJsonString(Json.Indented));
         if (!written.Ok)
             return Result.Failure($"{sidecar} was not written: {written.Error}");
@@ -1226,7 +1273,7 @@ public sealed class AssetManager : IDisposable
         }
 
         if (format == AssetFileFormat.Json)
-            return Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(json.ToJsonString(Json.Options)));
+            return Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(json.ToJsonString(Json.Indented)));
 
         return json["text"]?.GetValue<string>() is { } text
             ? Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(text))
@@ -1360,6 +1407,24 @@ public sealed class AssetManager : IDisposable
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// The type that the <c>.meta</c> of asset <paramref name="id"/> names, or why this run has no such type.
+    /// </summary>
+    private Result<AssetType> FindType(ulong id)
+    {
+        if (!Database.Index.ById.TryGetValue(id, out IndexedFile? indexed))
+            return Result.Failure($"no asset has the id {id}.");
+
+        if (!Loaded.Types.TryGetValue(indexed.Type, out AssetType? type))
+        {
+            return Result.Failure(
+                $"{indexed.Path} is a {indexed.Type}, which neither Magic nor a gem the project lists holds."
+            );
+        }
+
+        return Result.Success(type);
     }
 
     /// <summary>

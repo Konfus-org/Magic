@@ -25,11 +25,17 @@ BUILT_COST = 3000
 APPENDED_COST = 120
 
 
+def user_folder():
+    """The folder that the engine keeps for this user, which holds the caches and the settings of each project
+    (Files/UserFolders.cs)."""
+    local = os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), '.cache')
+    return os.path.join(local, 'Magic')
+
+
 def folder():
     """The folder of the entries: the add-on's own folder under the cache folder that the engine keeps for this user
     (Files/Caches.cs). The key holds the model's content, so the entries of every project stand together."""
-    local = os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), '.cache')
-    return os.path.join(local, 'Magic', 'Cache', 'Blender')
+    return os.path.join(user_folder(), 'Cache', 'Blender')
 
 
 def entry_of(path):

@@ -58,7 +58,7 @@ internal sealed class Cli
             Subcommands =
             {
                 OpenCommand.Create(app, files, assets, world, _queue),
-                NewCommand.Create(app, assets),
+                NewCommand.Create(app, files, assets, _queue),
                 ScreenshotCommand.Create(app, files, events),
                 SaveCommand.Create(app, settings, world, _queue),
                 LoadCommand.Create(app, world, _queue),
@@ -66,7 +66,7 @@ internal sealed class Cli
                 ImportCommand.Create(app, files, assets, _queue),
                 ExportCommand.Create(app, assets, _queue),
                 _query,
-                SetCommand.Create(app, settings, world, Commands),
+                SetCommand.Create(app, settings, assets, world, Commands, _queue),
                 SpawnCommand.Create(app, world, assets, _queue),
                 WaitCommand.Create(_queue, world),
                 ExitCommand.Create(app),

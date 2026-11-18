@@ -15,8 +15,8 @@ namespace Magic.CommandLine.Commands;
 /// </summary>
 /// <remarks>
 /// A subject is a command under it, as <c>query domain</c>. A first word that is no subject is a path: the key or the
-/// category of a setting, a property of a part that has a <see cref="CliPathAttribute"/>, or a value of an entity. A tool reads the JSON instead of working the values out again, and
-/// <c>--out</c> writes it to a file.
+/// category of a setting, a property of a part that has a <see cref="CliPathAttribute"/>, or a value of an entity. A
+/// tool reads the JSON instead of working the values out again, and <c>--out</c> writes it to a file.
 /// </remarks>
 internal static class QueryCommand
 {
@@ -98,7 +98,7 @@ internal static class QueryCommand
                 files,
                 output,
                 "world",
-                "Prints whether the world loads or is paused, how fast its time runs, its domains and how many entities it holds",
+                "Prints the world's domains and how many entities it holds",
                 () => WorldQuery.Describe(assets, world)
             )
         );

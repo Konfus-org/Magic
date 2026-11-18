@@ -11,9 +11,6 @@ from .project import LUMENS_PER_WATT, swap_pose
 # 5.3): the strength at which its sky stands for a light of one watt per square metre above the air.
 SKY_WATTS_AT_ONE = 181.6
 
-# The height, as the sine of the angle, down to which the sun still lights the world: the renderer's TwilightEnd.
-TWILIGHT_END = -0.139
-
 # Degrees from the middle to the edge of the disc that Magic aims its shadow rays through: Scene/Lights.slang's
 # SunAngularRadius.
 SHADOW_DISC_DEGREES = 1
@@ -32,42 +29,13 @@ SUN_NAME = 'MagicSun'
 REACH_NODE = 'MagicReach'
 
 
-def read_sun(light, components):
-    """A directional light as a file of the domain holds it: the unit direction towards it in Magic's axes, its colour
-    times its intensity in lux above the air, and what it is to the sky. The light of an hour is not here: Magic turns
-    the light through the day, and `query sky` prints it (lit_by)."""
+def sun_towards(components):
+    """The unit direction towards a directional light of a domain, in Magic's axes, from the way that its entity is
+    turned: Magic's light shines along the entity's own +Z. Which light lights the world, and the light of an hour, are
+    Magic's own: `query DeferredRendering.Sun` prints them (lit_by)."""
     r = components.get('Transform', {}).get('rotation', {})
     rotation = Quaternion((r.get('w', 1), r.get('x', 0), r.get('y', 0), r.get('z', 0)))
-    towards = -(rotation @ Vector((0, 0, 1)))
-    c = light.get('color', {'r': 1, 'g': 1, 'b': 1})
-    return towards, Vector((c['r'], c['g'], c['b'])) * light.get('intensity', 0), light.get('mode', 'default')
-
-
-def pick_sun(suns):
-    """The one directional light that lights the world, of each that read_sun gives: the sun while it is up or its
-    twilight lights the sky, else the moon while it is up, else the first (the renderer's GetSun). The import uses it
-    for the sky of the domain's own light, with no run of Magic."""
-    best, best_rank = None, -1
-    for sun in suns:
-        towards, _, mode = sun
-        rank = 0
-        if mode == 'sun' and towards.y > TWILIGHT_END:
-            rank = 2
-        elif mode == 'moon' and towards.y > 0:
-            rank = 1
-        if rank > best_rank:
-            best, best_rank = sun, rank
-    return best
-
-
-def sky_brightness(skies):
-    """What the domain's Sky component multiplies its sky's light by: Magic's Sky.Brightness, 1 where the prefab leaves
-    it out and where the domain has no sky. Magic takes the brightness of one sky entity alone, so a domain with more
-    than one cannot be copied."""
-    if len(skies) > 1:
-        raise ValueError(f'The domain holds {len(skies)} Sky components, and Magic takes the brightness of one of '
-                         'them alone: leave one sky in the domain.')
-    return float(skies[0].get('brightness', 1.0)) if skies else 1.0
+    return -(rotation @ Vector((0, 0, 1)))
 
 
 # The Earth's air, as Magic's sky integrates it: Sky/Atmosphere.slang's own constants. Distances are in kilometres.
@@ -89,14 +57,8 @@ def air_extinction(radius):
     rayleigh = math.exp(-height / RAYLEIGH_HEIGHT)
     mie = math.exp(-height / MIE_HEIGHT)
     ozone = max(0.0, min(1.0, 1.0 - abs(height - OZONE_CENTER) / OZONE_WIDTH))
-    return Vector(
-        [
-            RAYLEIGH_SCATTERING[channel] * rayleigh
-            + (MIE_SCATTERING + MIE_ABSORPTION) * mie
-            + OZONE_ABSORPTION[channel] * ozone
-            for channel in range(3)
-        ]
-    )
+    return Vector([RAYLEIGH_SCATTERING[channel] * rayleigh + (MIE_SCATTERING + MIE_ABSORPTION) * mie
+                   + OZONE_ABSORPTION[channel] * ozone for channel in range(3)])
 
 
 def distance_to_sphere(r, mu, radius):
@@ -191,8 +153,7 @@ def place_sun(collection, name, components, world):
     """A directional light of a domain as a sun lamp at the rotation, the colour and the strength that the domain's own
     files hold, where its entity stands. The import lights a scene with these, and set_hour puts the light of one hour
     in their place. Magic reads the direction of such a light alone, so the place is for a person to find it by."""
-    towards, illuminance, _ = read_sun(components['DirectionalLight'], components)
-    o = sun_lamp(name, towards, illuminance)
+    o = sun_lamp(name, sun_towards(components), sun_illuminance(components['DirectionalLight']))
     # The whole matrix in one write, as a point light's is: a rotation written by itself reaches matrix_world, which
     # sun_direction reads back, only at the next time that Blender works the scene out.
     o.matrix_world = Matrix.Translation(swap_pose(world).to_translation()) @ o.matrix_basis
@@ -211,6 +172,28 @@ def sun_lamp(name, towards, illuminance):
     o = bpy.data.objects.new(name, data)
     o.rotation_euler = Vector((towards.x, towards.z, towards.y)).to_track_quat('Z', 'Y').to_euler()
     return o
+
+
+def sun_illuminance(light):
+    """What a directional light of Magic gives, in lux per channel: its colour times its intensity. It is the one
+    value that a sun lamp of Blender holds, and both directions go through it."""
+    c = light.get('color', {'r': 1, 'g': 1, 'b': 1})
+    return Vector((c['r'], c['g'], c['b'])) * light.get('intensity', 0)
+
+
+def lamp_illuminance(o):
+    """What a sun lamp of Blender gives, in lux per channel: the inverse of sun_lamp."""
+    return Vector(o.data.color) * o.data.energy * LUMENS_PER_WATT
+
+
+def sun_light_values(o):
+    """A sun lamp of Blender as the colour and the intensity of Magic's directional light, split as sun_lamp split
+    them: the intensity is the brightest channel of the illuminance, and the colour is the illuminance over it. A lamp
+    that gives nothing keeps its colour, which has no meaning at an intensity of 0."""
+    illuminance = lamp_illuminance(o)
+    intensity = max(illuminance)
+    colour = illuminance / intensity if intensity else Vector((o.data.color[0], o.data.color[1], o.data.color[2]))
+    return {'color': {'r': colour.x, 'g': colour.y, 'b': colour.z}, 'intensity': intensity}
 
 
 def sun_direction(o):
@@ -263,11 +246,10 @@ def point_light_values(o):
     }
 
 
-def lit_by(sky):
-    """The light that lights the world, from what `query sky` prints: the unit direction towards it in Magic's axes,
-    its colour times its intensity in lux above the air, and what it is to the sky. Magic picks it by the renderer's
-    own rule."""
-    lit = sky['lit']
+def lit_by(lit):
+    """The light that lights the world, from what `query DeferredRendering.Sun` prints: the unit direction towards it
+    in Magic's axes, its colour times its intensity in lux above the air, and what it is to the sky. Magic picks it by
+    the renderer's own rule, so no rule of it stands here."""
     towards, illuminance = ([value.get(axis, 0) for axis in 'xyz'] for value in (lit['towards'], lit['illuminance']))
     return Vector(towards), Vector(illuminance), lit['mode']
 
@@ -282,12 +264,6 @@ def place_sky(scene, sun, altitude, brightness):
     if max(ground) > 0:
         scene.collection.objects.link(sun_lamp(SUN_NAME, towards, ground))
     sky_world(scene, towards, sky_strength(sun, brightness))
-
-
-def place_own_sky(scene, sun, brightness):
-    """Blender's sky over a domain that holds a Sky entity, lit from the domain's own directional light. A domain with
-    no Sky gets no sky: the import invents none."""
-    sky_world(scene, sun[0], sky_strength(sun, brightness))
 
 
 def sky_world(scene, towards, strength):

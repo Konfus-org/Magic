@@ -23,11 +23,11 @@ the entry point of the gem.
 To let a tool read values, register a subject of `query`. The function gives the values as a JSON object:
 
 ```csharp
-commands.RegisterQuery("sky", "Prints the lights and the factors of the sky", () => SkyQuery.Describe(ecs, settings));
+commands.RegisterQuery("gpu", "Prints the GPU that draws", GraphicsApi.Describe);
 ```
 
-`query sky` then prints the JSON, and `query sky --out <file>` writes it to a file. The sky gem adds
-`sky` this way (see the console commands in the [README](../README.md)).
+`query gpu` then prints the JSON, and `query gpu --out <file>` writes it to a file. The GPU provider adds
+`gpu` this way (see the console commands in the [README](../README.md)).
 
 To add a command that does something else, call `commands.Register` with a `System.CommandLine` `Command`, as
 Magic's own commands are. Reference the package in the csproj of the gem with

@@ -43,6 +43,26 @@ internal sealed class CommandQueue(EventCoordinator events)
     public void Hold(Func<bool> isHeld) => _hold = isHeld;
 
     /// <summary>
+    /// Holds the lines after this one until <paramref name="work"/> ends, then runs <paramref name="apply"/> on the
+    /// game thread.
+    /// </summary>
+    /// <remarks>
+    /// Work that ends cancelled or faulted runs nothing: the run is ending, or the task says what it threw. What the
+    /// work made for <paramref name="apply"/>, the work itself keeps.
+    /// </remarks>
+    public void Hold(Task work, Action apply) =>
+        Hold(() =>
+        {
+            if (!work.IsCompleted)
+                return true;
+
+            if (work.IsCompletedSuccessfully)
+                apply();
+
+            return false;
+        });
+
+    /// <summary>
     /// Returns <paramref name="change"/>, a change to the world a command started: <see cref="IsChangingWorld"/> holds
     /// until it ends.
     /// </summary>

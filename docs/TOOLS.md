@@ -3,9 +3,11 @@
 The scripts in `tools/Scripts/` build and check Magic. Nothing in `tools/` ships.
 
 `tools/Blender/` holds a Blender add-on that reads a domain of a Magic project into Blender and writes it back:
-File > Import > Magic (.magic) and File > Export > Magic (.magic). The reference tools build their Cycles scene with
-its import ([Reference views](DEBUGGING.md#reference-views)). How to install it, and what the export writes and
-skips, are in [its README](../tools/Blender/README.md).
+File > Import > Magic (.magic) and File > Export > Magic (.magic). Object Properties > Magic holds the components of
+an entity. The reference tools build their Cycles scene with its import
+([Reference views](DEBUGGING.md#reference-views)). The add-on runs the Magic program that a person sets in its
+preferences and builds nothing. How to install it, how to set that program, and what the export writes and skips,
+are in [its README](../tools/Blender/README.md).
 
 ## Scripts
 
@@ -180,7 +182,8 @@ tools/Scripts/UpdateReferences.ps1 -All                              # every vie
 needs `git lfs install` one time, and the checkout step of a CI job needs `lfs: true`. What each stored file holds is
 in [Reference views](DEBUGGING.md#reference-views).
 
-It needs Blender. Give its path with `-Blender` when it is not the default one.
+It needs Blender. Give its path with `-Blender` when it is not the default one. It builds Magic one time and gives
+Blender the program of that build, which Blender starts with no window.
 
 ## Profiling.ps1
 

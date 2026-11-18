@@ -8,9 +8,12 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>query world</c>: prints whether the world loads or is paused, how fast its time runs, its domains and how many
-/// entities it holds.
+/// <c>query world</c>: prints the world's domains and how many entities it holds.
 /// </summary>
+/// <remarks>
+/// The console path <c>World</c> gives what a path can give, as <c>query World.IsPaused</c>, and <c>wait loaded</c>
+/// holds a line until the world is there.
+/// </remarks>
 internal static class WorldQuery
 {
     public static JsonObject Describe(AssetManager assets, World world)
@@ -25,14 +28,11 @@ internal static class WorldQuery
 
         return new JsonObject
         {
-            ["isLoading"] = world.IsLoading,
-            ["isPaused"] = world.IsPaused,
-            ["timeScale"] = world.TimeScale,
             ["domains"] = new JsonArray([
                 .. world
                     .Domains.Select(domain => index.ById.GetValueOrDefault(domain.Id))
                     .OfType<IndexedFile>()
-                    .Select(AssetQuery.Describe),
+                    .Select(CommandLookups.DescribeAsset),
             ]),
             ["entities"] = entities,
         };

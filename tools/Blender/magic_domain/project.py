@@ -6,15 +6,19 @@
 # Each conversion stands here one time and both directions use it, so that the import and the export cannot drift
 # apart.
 import functools
+import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from collections import namedtuple
 
+import bpy
 from mathutils import Matrix, Quaternion, Vector
+
+from .cache import folder as cache_folder
+from .cache import user_folder
 
 # The swap between Magic's axes and Blender's, which is its own inverse.
 SWAP = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
@@ -25,9 +29,17 @@ LUMENS_PER_WATT = 683
 # Metres that a chunk of a domain covers on each axis: Domain.ChunkSize.
 CHUNK_SIZE = 128
 
+# The folders under a project that hold no asset and no prefab: what a build and git keep there.
+SKIPPED = ('bin', 'obj', 'Build', '.git')
+
 # Decimal places that a written number keeps: shorter than a millimetre over the world's widest coordinate, and short
 # enough that the files stay readable.
 PLACES = 6
+
+# Where a person sets the Magic program that a run starts. The add-on starts the program that it is given and builds
+# nothing.
+MAGIC_UNSET = ('Set one in Edit > Preferences > Add-ons > Magic Domain > Magic Executable, give one to a script with '
+               '--magic, or set the MAGIC_EXE environment variable.')
 
 # Where a record stands: the prefab file that holds it, and the way down to it, which is its place in the file's
 # entities and then its place in each children list under it.
@@ -102,6 +114,12 @@ def rounded(value):
     return value
 
 
+def comment_lines(path):
+    """How many // comment lines a file holds. A write from the records does not hold them, so the caller that writes
+    one again says in its report that they are lost."""
+    return sum(1 for line in open(path, encoding='utf-8-sig') if line.lstrip().startswith('//'))
+
+
 def write_prefab(path, data):
     """Writes a prefab: one entity to a line, which keeps the file readable and its differences short. A // comment of
     the file that the data was read from is not in the data and is lost, so a caller that changed nothing copies the
@@ -115,44 +133,148 @@ def write_prefab(path, data):
         file.write('{\n' + ',\n'.join(body) + '\n}\n')
 
 
-def run_magic(project_path, lines, seconds=600):
-    """Runs Magic on the project with no window and gives it the console lines, through tools/Scripts/Run.ps1 of the
-    folder that holds the engine. The run ends at the first error that Magic logs, and that is an error here too. A
-    line that needs an answer writes it to a file with --out."""
-    script = os.path.join(find_root(project_path), 'tools', 'Scripts', 'Run.ps1')
-    quoted = ', '.join("'" + line.replace("'", "''") + "'" for line in list(lines) + ['exit'])
-    command = (f"& '{script}' -Headless -Seconds {seconds} -Project '{os.path.abspath(project_path)}' "
-               f'-Commands {quoted}; exit $LASTEXITCODE')
-    ran = subprocess.run([shutil.which('pwsh') or 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-                          '-Command', command], capture_output=True, text=True, timeout=seconds + 120)
-    if ran.returncode != 0:
-        raise ValueError(f'Magic did not run {lines} on {project_path}:\n{ran.stdout[-2000:]}{ran.stderr[-2000:]}')
+def magic_path(magic=None):
+    """The Magic program that a run starts: the one that the caller names, then the add-on's preferences, then the
+    MAGIC_EXE environment variable. The add-on builds nothing and knows no folder of its own, so a run with none of
+    the three set is an error that says where to set one.
+
+    The preferences hold none while the add-on is not installed, as it is not in a script that imports the package
+    from its folder."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    preference = addon.preferences.executable if addon else None
+    named = next((path for path in (magic, preference, os.environ.get('MAGIC_EXE')) if path), None)
+    if not named:
+        raise ValueError(f'This needs a Magic program and none is set. {MAGIC_UNSET}')
+    program = bpy.path.abspath(named)
+    if not os.path.isfile(program):
+        raise ValueError(f'There is no Magic program at {program}. {MAGIC_UNSET}')
+    return program
 
 
-def query_skies(project_path, hours):
-    """What Magic's `query sky` prints at each hour, by the hour: the lights of the world, the one that lights it and
-    the brightness of the sky. Magic holds its day at the hour first (`set Day.Hour`), and waits for the day cycle to
-    turn the lights. For the hour None, the lights are where the world has them once it is loaded. One run of Magic
-    gives every hour."""
-    skies = {}
+def kill_tree(process):
+    """Ends a run of Magic, and every process that the run started."""
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/T', '/F', '/PID', str(process.pid)], capture_output=True)
+    else:
+        process.kill()
+    process.wait()
+
+
+def run_magic(project_path, lines, seconds=600, magic=None):
+    """Runs Magic on the project with no window and gives it the console lines. The run ends at the first error that
+    Magic logs, and that is an error here too. A line that needs an answer writes it to a file with --out. A run still
+    going at the time limit is killed."""
+    arguments = [magic_path(magic), 'open', os.path.abspath(project_path), '--headless', 'true', '--fail-on-error']
+    started = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True)
+    try:
+        printed = started.communicate('\n'.join([*lines, 'exit']) + '\n', timeout=seconds)[0]
+    except subprocess.TimeoutExpired:
+        kill_tree(started)
+        raise ValueError(f'Magic ran {lines} on {project_path} for more than {seconds} s, so the run was ended.')
+    if started.returncode != 0:
+        raise ValueError(f'Magic did not run {lines} on {project_path}:\n{printed[-4000:]}')
+
+
+def project_state(project_path):
+    """What an answer of Magic depends on in the project: the project file and each prefab under its folder, by path
+    and by the time it was written. A query reads these files, so its answer stands while none of them changed."""
+    folder = os.path.dirname(os.path.abspath(project_path))
+    files = [os.path.abspath(project_path)]
+    for top, dirs, names in os.walk(folder):
+        dirs[:] = [name for name in dirs if name not in SKIPPED]
+        files += [os.path.join(top, name) for name in names if name.endswith('.prefab')]
+    return [[path, os.path.getmtime(path)] for path in sorted(files)]
+
+
+def file_state(paths, under):
+    """The state of files that an answer of Magic depends on: each one by its name under a folder, its size and the
+    time it was written. A file that is gone while this reads it is left out, and the run answers again."""
+    held = []
+    for path in sorted(paths):
+        try:
+            held.append([os.path.relpath(path, under).replace(os.sep, '/'),
+                         os.path.getsize(path), os.path.getmtime(path)])
+        except OSError:
+            continue
+    return held
+
+
+def program_state(program):
+    """What an answer of Magic depends on in the build that answers it: the program, and each .dll under its folder,
+    which is where the gems and the project's own code stand (Projects/GemRegistry.cs). A gem that was built again
+    answers another way, and the program's own file does not change with it."""
+    folder = os.path.dirname(os.path.abspath(program))
+    found = [os.path.abspath(program)]
+    for top, dirs, names in os.walk(folder):
+        found += [os.path.join(top, name) for name in names if name.endswith('.dll')]
+    return file_state(set(found), folder)
+
+
+def settings_state(project_path):
+    """What an answer of Magic depends on in the settings of the project: each file that the engine keeps for this
+    user under the project's name (Configuration/Settings.cs). A `set` of a run before this one stands there, and a
+    query answers by it."""
+    name = json.load(open(project_path, encoding='utf-8-sig')).get('name', '')
+    folder = os.path.join(user_folder(), name, 'Settings')
+    if not os.path.isdir(folder):
+        return []
+    return file_state([os.path.join(folder, held) for held in os.listdir(folder)], folder)
+
+
+def answers_entry(project_path, steps, program):
+    """The file that holds the answers of one run of queries, under the cache folder of the engine: its key holds the
+    build that answered, the steps that were asked and the state of the project's files, so that the answers of
+    another Magic, of a gem that was built again, of other steps, of other settings or of a project that changed are
+    never read."""
+    key = json.dumps([program, program_state(program), [list(step) for step in steps],
+                      project_state(project_path), settings_state(project_path)])
+    return os.path.join(cache_folder(), f'answers-{hashlib.sha1(key.encode()).hexdigest()[:16]}.json')
+
+
+def read_answers(entry):
+    """The answers that an entry holds, or nothing while no entry holds them or the file is damaged. A run answers
+    again either way."""
+    try:
+        with open(entry, encoding='utf-8') as file:
+            return json.load(file)
+    except (OSError, ValueError):
+        return None
+
+
+def write_answers(entry, answers):
+    """Keeps the answers of a run as its entry. The write goes to a name of its own and takes the entry's place in one
+    step, so that a run which ends in the middle leaves no half entry behind."""
+    os.makedirs(os.path.dirname(entry), exist_ok=True)
+    half = f'{entry}.{os.getpid()}'
+    with open(half, 'w', encoding='utf-8') as file:
+        json.dump(answers, file)
+    os.replace(half, entry)
+
+
+def run_queries(project_path, steps):
+    """What each query of Magic answers, in the order asked. A step is the console lines to run and the query to
+    answer, as ('query components',) or ('set Day.Hour 12', 'wait 2s', 'query DeferredRendering.Sun'). One headless
+    run of Magic answers every step: each query writes its JSON to a file with --out, and this reads it back. The
+    answers are kept, so the same steps on a project that nothing changed start Magic no second time."""
+    program = magic_path()
+    entry = answers_entry(project_path, steps, program)
+    kept = read_answers(entry)
+    if kept is not None:
+        return kept
+    answers = []
     with tempfile.TemporaryDirectory() as folder:
-        lines = ['wait loaded']
-        for at, hour in enumerate(hours):
-            if hour is not None:
-                lines += [f'set Day.Hour {hour:g}', 'wait 2s']
-            lines.append(f'query sky --out "{os.path.join(folder, str(at))}.json"')
-        run_magic(project_path, lines)
-        for at, hour in enumerate(hours):
-            with open(os.path.join(folder, f'{at}.json'), encoding='utf-8') as file:
-                skies[hour] = json.load(file)
-    return skies
-
-
-def make_handles(project_path, paths):
-    """Gives each file that has no .meta one, with Magic's `new handle`. Magic alone knows which id is free and which
-    type a file is, so no rule of it stands here."""
-    if paths:
-        run_magic(project_path, [f'new handle "{path}"' for path in paths])
+        lines, files = ['wait loaded'], []
+        for at, step in enumerate(steps):
+            out = os.path.join(folder, f'{at}.json')
+            files.append(out)
+            lines += [*step[:-1], f'{step[-1]} --out "{out}"']
+        run_magic(project_path, lines, magic=program)
+        for out in files:
+            with open(out, encoding='utf-8') as file:
+                answers.append(json.load(file))
+    write_answers(entry, answers)
+    return answers
 
 
 def find_root(project_path):
@@ -175,7 +297,7 @@ def index_assets(root):
     starts = [os.path.join(root, folder) for folder in ('src', 'samples') if os.path.isdir(os.path.join(root, folder))]
     for start in starts or [root]:
         for top, dirs, files in os.walk(start):
-            dirs[:] = [d for d in dirs if d not in ('bin', 'obj', 'Build', '.git')]
+            dirs[:] = [name for name in dirs if name not in SKIPPED]
             for name in files:
                 if name.endswith('.meta'):
                     path = os.path.join(top, name)
@@ -313,27 +435,9 @@ def model_ids(assets, datas):
     return found
 
 
-def all_placements(assets, file, data, parent):
-    """Each entity of one prefab file, every prefab that it brings in opened at the place of its instance. Every
-    instance shares the prefab's own records, so the entities of a prefab come again for each instance of it, each at
-    the place of that instance."""
-    for placement in own_placements(file, data, parent):
-        yield placement
-        inner = prefab_of(assets, placement.entity)
-        if inner is not None:
-            yield from all_placements(assets, inner, read_prefab(inner), placement.world)
-
-
 def domain_prefabs(folder):
     """The prefab files of a domain, in the order that a walk of the domain reads them."""
     return sorted(name for name in os.listdir(folder) if name.endswith('.prefab'))
-
-
-def domain_entities(assets, folder):
-    """Each entity of a domain's prefabs, the prefabs they bring in opened, each chunk at its own corner."""
-    for name in domain_prefabs(folder):
-        path = os.path.join(folder, name)
-        yield from all_placements(assets, path, read_prefab(path), chunk_corner(name))
 
 
 def domain_folder(assets, project_path, domain=None):

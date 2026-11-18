@@ -8,8 +8,10 @@
 # - A prefab is one collection, built one time, and each place that uses it is an empty whose instance_collection is
 #   that collection. The collections stand under one collection that the view layer leaves out, so Blender draws a
 #   prefab where its instances stand and nowhere else.
+# - A chunk of the world is one collection, under the collection of the domain, which holds the objects of the
+#   entities that the chunk's own prefab places. The view distance hides a whole chunk at one time (the chunks).
 #
-# An import builds the domain itself out of the view layer too, and shows it in one step at the end (STAGING).
+# An import builds the collections of the domain out of the scene, and links them into it in one step at the end.
 import copy
 import os
 import shutil
@@ -18,27 +20,32 @@ import time
 import bpy
 from mathutils import Matrix
 
-from .lights import (SUN_NAME, light_values, lit_by, pick_sun, place_own_sky, place_point_light, place_sky,
-                     place_sun, point_light_as_read, point_light_values, reach_node, read_sun, sky_brightness,
-                     sky_strength, sun_direction)
+from .chunks import BOX, box_of
+from .lights import (SUN_NAME, lamp_illuminance, light_values, lit_by, place_point_light, place_sky, place_sun,
+                     point_light_as_read, point_light_values, reach_node, sky_strength, sky_world, sun_direction,
+                     sun_illuminance, sun_light_values, sun_towards)
 from .assets import write_assets
 from .cache import read_cost
+from .components import (MAPPED, handle_names, held, keep_schema, put, read_schema, same_value, schema_of,
+                         write as write_values)
 from .meshes import import_model, mesh_fault, mesh_hash, place_renderer
-from .project import (Address, chunk_at, chunk_corner, chunk_name, chunk_of_name, domain_folder, domain_prefabs,
-                      file_path, find_root, index_assets, make_handles, model_ids, own_placements, path_of,
-                      path_text, prefab_of, read_prefab, record_at, same_matrix, swap_axes, swap_pose,
-                      transform_values, write_prefab)
+from .project import (Address, chunk_at, chunk_corner, chunk_name, chunk_of_name, comment_lines, domain_folder,
+                      domain_prefabs, file_path, find_root, index_assets, model_ids, own_placements, path_of,
+                      path_text, prefab_of, read_prefab, record_at, run_magic, run_queries, same_matrix, swap_axes,
+                      swap_pose, transform_values, write_prefab)
 
 __all__ = ['Build', 'Domain', 'Report', 'export_domain', 'import_domain', 'set_hour']
 
 # The collection that holds one collection for each prefab.
 PREFABS = 'MagicPrefabs'
 
-# The collection that an import builds the domain in, which the view layer leaves out while the import runs. Blender
-# draws the scene again after each part, and an object in the view layer makes that drawing cost about two seconds a
-# part near the end of a large domain. Out of the view layer it costs nothing. The last part of the import links the
-# objects into the scene and takes this collection away, so the scene that the import leaves is the same.
-STAGING = 'MagicImport'
+# The collection that holds the objects of the prefabs of a domain that are no chunk of the world, which no view
+# distance hides.
+GLOBALS = 'Globals'
+
+# The name that an entity with no name of its own gets, which its empty carries and the export reads back as the
+# same.
+UNNAMED = 'entity'
 
 # Entities between two writes of the text that the progress bar shows. One part of an import is one object, which is
 # shorter than an eye sees, and a count that goes up 500 at a time reads as well as one that counts every entity.
@@ -46,11 +53,13 @@ TEXT_EVERY = 500
 
 
 class Domain:
-    """A domain in the scene, and what the hour still needs: the scene it was built in, the pose in Magic's axes of
-    each marker, and the lamps that the import made of the domain's own lights, which set_hour takes away."""
+    """A domain in the scene, and what the hour still needs: the scene it was built in, the collection that holds its
+    chunks, the pose in Magic's axes of each marker, and the lamps that the import made of the domain's own lights,
+    which set_hour takes away."""
 
-    def __init__(self, scene, markers, suns):
+    def __init__(self, scene, collection, markers, suns):
         self.scene = scene
+        self.collection = collection
         self.markers = markers
         self.suns = suns
 
@@ -79,13 +88,6 @@ class Report:
                 + [f'skipped {name}: {reason}' for name, reason in self.skipped])
 
 
-def is_marker(entity, components):
-    """An entity that only stands somewhere: it has a name, it brings no prefab of its own, and a Transform is all it
-    holds."""
-    return (entity.get('name') and 'prefab' not in entity
-            and set(components) <= {'Transform'})
-
-
 def object_kinds(placement):
     """The objects that an entity puts in the scene: one for what it draws, one for its lamp, one for its directional
     light, one instance of the prefab that it brings in, and an empty for an entity that only stands somewhere. The
@@ -100,9 +102,9 @@ def object_kinds(placement):
         kinds.append('sun')
     if 'prefab' in placement.entity:
         kinds.append('instance')
-    if is_marker(placement.entity, placement.components):
-        kinds.append('marker')
-    return kinds
+    # An entity that puts no object of its own in the scene stands in it as an empty, so that a person sees it, moves
+    # it, and edits the components that it holds.
+    return kinds or ['marker']
 
 
 def place_marker(collection, name, tags, world):
@@ -134,11 +136,24 @@ def marker_values(o):
     return o.name, [str(tag) for tag in o.get('tags', [])]
 
 
+def slot_materials(o):
+    """The material of each slot of an object as Magic's Renderer holds it, and a line for a material that is no asset
+    of the project: the write of the assets makes a file for each material that a person made, and names the ones
+    whose nodes it could not read, so a material with no file is named in the report already."""
+    held = [slot.material for slot in o.material_slots if slot.material]
+    unknown = [material.name for material in held if 'magic_id' not in material]
+    if unknown:
+        return None, f'its material {", ".join(unknown)} is no material of the project'
+    return [{'id': int(material['magic_id'])} for material in held], None
+
+
 def renderer_values(o):
     """A mesh object of Blender as Magic's Renderer component: the model that its mesh came from, and the materials
-    that its slots hold."""
-    return {'model': {'id': int(o.data['magic_model'])},
-            'materials': [{'id': int(slot.material['magic_id'])} for slot in o.material_slots if slot.material]}
+    that its slots hold. It is nothing, with a line, for a slot whose material is no asset of the project."""
+    materials, fault = slot_materials(o)
+    if fault:
+        return None, fault
+    return {'model': {'id': int(o.data['magic_model'])}, 'materials': materials}, None
 
 
 def world_of(o):
@@ -191,9 +206,11 @@ class Build:
         self.text = self.stage
         self.domain = None
         self.holder = None
-        self.staging = None
+        self.collection = None
+        self.chunks = {}
         self.models, self.materials, self.meshes, self.prefabs = {}, {}, {}, {}
-        self.markers, self.lights, self.skies, self.suns = {}, [], [], []
+        self.markers, self.skies, self.suns = {}, [], []
+        self.schema, self.names, self.unknown = {}, {}, {}
         self.parts = self.build(project_path, domain)
 
     def run(self, deadline):
@@ -213,21 +230,37 @@ class Build:
     def drop(self):
         """Takes away what is built so far, for an import that a person stopped. It takes away its own objects alone:
         an object that stood in the scene before the import stays."""
-        for collection in list(self.prefabs.values()) + [self.holder, self.staging]:
+        for collection in list(self.prefabs.values()) + list(self.chunks.values()) + [self.holder, self.collection]:
             if collection is None:
                 continue
             for o in list(collection.objects):
                 bpy.data.objects.remove(o, do_unlink=True)
             bpy.data.collections.remove(collection, do_unlink=True)
 
-    def show(self):
-        """Puts the objects of the domain into the scene and takes the staging collection away. Blender draws the
-        whole domain one time, in this one part."""
-        link = self.scene.collection.objects.link
-        for o in self.staging.objects:
-            link(o)
-        bpy.data.collections.remove(self.staging, do_unlink=True)
-        self.staging = None
+    def show(self, name):
+        """Puts the collections of the domain into the scene, under one collection of the name of the domain, which
+        draws the whole domain one time in this one part.
+
+        A collection out of the scene is out of the view layer, and Blender draws the scene again after each part of
+        the import: an object in the view layer makes that drawing cost about two seconds a part near the end of a
+        large domain, and out of it the import pays nothing for it."""
+        self.collection = bpy.data.collections.new(name)
+        self.scene.collection.children.link(self.collection)
+        for chunk in sorted(self.chunks):
+            self.collection.children.link(self.chunks[chunk])
+
+    def chunk_collection(self, prefab_name):
+        """The collection that holds the objects of one chunk of the world, built the first time a prefab of that
+        chunk places an entity. It carries the box that the chunk covers, which the view distance measures to (the
+        chunks). Every prefab of the domain that is no chunk shares one collection of globals."""
+        box = box_of(prefab_name)
+        name = GLOBALS if box is None else os.path.splitext(prefab_name)[0]
+        if name not in self.chunks:
+            collection = bpy.data.collections.new(name)
+            if box is not None:
+                collection[BOX] = box
+            self.chunks[name] = collection
+        return self.chunks[name]
 
     def prefab_collection(self, record):
         """The collection of the prefab that a record brings in, built the first time a record uses it. A prefab that
@@ -249,7 +282,8 @@ class Build:
         """The objects of one entity, in the collection of the domain or of the prefab that holds it. Each object is
         one part of the import, so that the longest part is the one object that costs the most: the first that draws
         a model, which reads the model's file."""
-        name = placement.entity.get('name', 'entity')
+        name = placement.entity.get('name', UNNAMED)
+        own = None
         for kind in object_kinds(placement):
             if kind == 'mesh':
                 o = place_renderer(collection, self.assets, name, placement.components['Renderer'], placement.world,
@@ -258,7 +292,6 @@ class Build:
                 o = place_point_light(collection, name, placement.components['PointLight'], placement.world)
             elif kind == 'sun':
                 o = place_sun(collection, name, placement.components, placement.world)
-                self.lights.append(placement.components)
                 self.suns.append(o)
             elif kind == 'instance':
                 prefab = yield from self.prefab_collection(placement.entity)
@@ -267,7 +300,10 @@ class Build:
                 self.markers[name] = placement.world
                 o = place_marker(collection, name, placement.entity.get('tags', []), placement.world)
             stamp(o, placement.where, kind)
+            own = own or o
             yield
+        # The first object of an entity carries its components, so that each component stands in one place.
+        put(own, placement.entity, self.schema, self.names, self.unknown)
         if 'Sky' in placement.components:
             self.skies.append(placement.components['Sky'])
 
@@ -275,11 +311,27 @@ class Build:
         """The parts of one import: the assets of the project, the prefab files, one model read, and one object of
         the domain. The caller runs them part by part, or to the end."""
         read_prefab.cache_clear()
-        self.assets = index_assets(find_root(project_path))
+        root = find_root(project_path)
+        self.assets = index_assets(root)
+        self.names = handle_names(self.assets, root)
         folder = domain_folder(self.assets, project_path, domain)
         names = domain_prefabs(folder)
         here = os.path.basename(folder)
         yield
+
+        # The component types, the light that lights the domain and the sky's own factor, from one run of Magic:
+        # nothing that Magic knows is worked out here. A domain that the project does not open is opened for the run.
+        # The scene keeps the component types for the panel and for the export, so a file that opens again runs Magic
+        # no more.
+        self.stage = self.text = 'the component types and the light of Magic'
+        yield
+        opened = [f'open {domain}', 'wait loaded'] if domain else []
+        printed = run_queries(project_path, [(*opened, 'query components'), ('query DeferredRendering.Sun',),
+                                             ('query ProceduralSky.Brightness',)])
+        self.schema = read_schema(printed[0])
+        keep_schema(self.scene, self.schema)
+        self.sun = lit_by(printed[1]['value'])
+        self.brightness = printed[2]['value']
 
         datas = {}
         self.stage = 'the prefab files'
@@ -305,38 +357,38 @@ class Build:
         self.holder = bpy.data.collections.new(PREFABS)
         self.scene.collection.children.link(self.holder)
         exclude_collection(self.scene, self.holder)
-        self.staging = bpy.data.collections.new(STAGING)
-        self.scene.collection.children.link(self.staging)
-        exclude_collection(self.scene, self.staging)
         self.stage = 'the entities'
         placed = 0
         for name in names:
             path = os.path.join(folder, name)
+            collection = self.chunk_collection(name)
             for placement in own_placements(path, datas[name], chunk_corner(name)):
-                yield from self.place(self.staging, placement)
+                yield from self.place(collection, placement)
                 self.done += 1
                 placed += 1
                 if placed % TEXT_EVERY == 0:
                     self.text = f'{here} {placed:,} of {entities:,}'
         self.text = f'{here} {placed:,} of {entities:,}'
-        self.stage = 'the domain in the view'
-        self.text = self.stage
+        self.stage = self.text = 'the domain in the view'
         yield
-        self.show()
+        self.show(here)
 
         self.scene['magic_project'] = os.path.abspath(project_path)
         self.scene['magic_folder'] = os.path.abspath(folder)
-        brightness = sky_brightness(self.skies)
-        if self.skies and self.lights:
-            place_own_sky(self.scene, pick_sun([read_sun(c['DirectionalLight'], c) for c in self.lights]),
-                          brightness)
-        self.domain = Domain(self.scene, self.markers, self.suns)
+        # A domain with no Sky entity and no light of its own gets no sky: the import invents none.
+        if self.skies and self.suns:
+            sky_world(self.scene, self.sun[0], sky_strength(self.sun, self.brightness))
+            # The strength that the sky would have at a brightness of 1, by which the export reads a changed
+            # brightness back (write_sky). set_hour writes it again for the light of its hour.
+            self.scene['magic_sky_at_one'] = sky_strength(self.sun, 1.0)
+        self.domain = Domain(self.scene, self.collection, self.markers, self.suns)
 
 
 def import_domain(project_path, domain=None, scene=None):
     """Builds the domain of a project into a scene, all at once: every mesh that Magic draws with its materials, every
     lamp, one collection for each prefab with an instance of it at each place that uses it, an empty at each marker,
-    and the light that the domain's own files hold. The scene keeps the project and the domain's folder, so that
+    and the light that the domain's own files hold. The objects of each chunk of the world stand in a collection of
+    the chunk's own (the chunks). The scene keeps the project and the domain's folder, so that
     export_domain writes it back where it came from. It draws nothing, and says each stage on the console."""
     build = Build(project_path, domain, scene)
     said = None
@@ -347,29 +399,21 @@ def import_domain(project_path, domain=None, scene=None):
     return build.domain
 
 
-def set_hour(domain, sky, altitude):
-    """The light of one hour, in the place of the light that the domain's files hold, from what Magic's `query sky`
-    prints at that hour (project.query_skies): the sun or the moon as a lamp, with the sky that it lights, so many
-    metres over the ground. It gives back which of the two lights the world. A slice that exaggerates the look of an
-    hour changes this one function."""
+def set_hour(domain, sun, brightness, altitude):
+    """The light of one hour, in the place of the light that the domain's files hold, from what Magic's
+    `query DeferredRendering.Sun` prints at that hour (lights.lit_by): the sun or the moon as a lamp, with the sky that
+    it lights, so many metres over the ground. It gives back which of the two lights the world. A slice that
+    exaggerates the look of an hour changes this one function."""
     scene = domain.scene
     for o in domain.suns + ([bpy.data.objects[SUN_NAME]] if SUN_NAME in bpy.data.objects else []):
         bpy.data.objects.remove(o, do_unlink=True)
     domain.suns = []
     if scene.world:
         bpy.data.worlds.remove(scene.world, do_unlink=True)
-    sun = lit_by(sky)
-    place_sky(scene, sun, altitude, sky['sky']['brightness'])
+    place_sky(scene, sun, altitude, brightness)
     # The strength that the sky would have at a brightness of 1, by which the export reads a changed brightness back.
     scene['magic_sky_at_one'] = sky_strength(sun, 1.0)
     return sun[2]
-
-
-def near(one, other):
-    """Whether two values of an entity are the same number, or the same values under the same keys."""
-    if isinstance(one, dict):
-        return all(near(value, other.get(key)) for key, value in one.items())
-    return other is not None and abs(float(one) - float(other)) <= 1e-5 * max(1.0, abs(float(one)))
 
 
 class Export:
@@ -379,7 +423,12 @@ class Export:
         self.scene = scene
         self.source = os.path.abspath(scene['magic_folder'])
         self.folder = os.path.abspath(folder or self.source)
-        self.assets = index_assets(find_root(scene['magic_project']))
+        root = find_root(scene['magic_project'])
+        self.assets = index_assets(root)
+        self.schema = schema_of(scene)
+        # The panel shows a handle as the path of its asset, and a path that a person picked reads back
+        # as the id that the prefab holds.
+        self.ids = {name: asset for asset, name in handle_names(self.assets, root).items()}
         self.files = {}
         self.touched = set()
         self.worlds = {}
@@ -418,15 +467,17 @@ class Export:
         self.extra.setdefault(os.path.abspath(path), []).append(record)
         self.report.added += 1
 
-    def skip(self, o, reason):
-        self.report.skipped.append((o.name, reason))
+    def skip(self, name, reason):
+        """Says in the report that the export could not write one object or one asset, and why. Every line of the
+        report that names a thing of Blender goes through here."""
+        self.report.skipped.append((name, reason))
 
     def comments(self, path, name):
         """Says in the report that a file which the export wrote again holds comments, which its records do not and
         the write cannot keep."""
-        lines = sum(1 for line in open(path, encoding='utf-8-sig') if line.lstrip().startswith('//'))
+        lines = comment_lines(path)
         if lines:
-            self.report.skipped.append((name, f'{lines} comment lines of the file, which its entities do not hold'))
+            self.skip(name, f'{lines} comment lines of the file, which its entities do not hold')
 
 
 def chunk_destination(export):
@@ -458,6 +509,11 @@ def corner_of(export, where, world, destination):
     return destination(world)
 
 
+def set_place(record, corner, world):
+    """Writes where a record stands into it: its place from the corner that its own file keeps it from."""
+    record.setdefault('components', {})['Transform'] = transform_values(corner.inverted_safe() @ world)
+
+
 def new_record(o):
     """The entity for an object that a person made in Blender, with no place yet, or why the export cannot write it.
     A new model and a new material are assets of the project, which this writes none of."""
@@ -487,39 +543,83 @@ def new_record(o):
         if o.data['magic_hash'] != mesh_hash(o.data):
             return None, ('its mesh is a changed model whose file the export could not write, so the points of the '
                           'object and the points of the model are not the same')
-        return {'name': o.name, 'components': {'Renderer': renderer_values(o)}}, None
+        renderer, fault = renderer_values(o)
+        if fault:
+            return None, fault
+        return {'name': o.name, 'components': {'Renderer': renderer}}, None
     return None, f"Blender's {o.type.lower()} is no entity of Magic"
 
 
 def changed_values(export, where, kind, o):
-    """Writes back what a person changes at an entity that is not where it stands: a lamp's colour, strength, bulb and
-    reach, a marker's name and its tags, and the way a directional light was turned. It gives the number of entities
-    that it changed."""
+    """Writes back what a person changes at an entity that is not where it stands: the values that Blender holds its
+    own way, and the components that the panel shows. It gives the number of entities that it changed."""
     record = record_at(export.data(where.file), where.path)
+    if not (changed_kind(export, record, kind, o) | changed_components(export, record, o)):
+        return 0
+    export.touch(where.file)
+    return 1
+
+
+def changed_components(export, record, o):
+    """Writes the components that the panel shows into an entity's record, and says in the report each value that it
+    could not write. An object that carries none of them, such as the second object of one entity, changes nothing.
+    It gives whether the record changed."""
+    if MAPPED not in o and not held(o):
+        return False
+    changed, faults = write_values(record, o, export.schema, export.ids)
+    for fault in faults:
+        export.skip(o.name, fault)
+    return changed
+
+
+def changed_sun(export, record, o):
+    """Writes back what a person changes at the sun lamp of a directional light: the way that it points, and the
+    colour and the intensity that its illuminance holds. A lamp that is no sun lamp any more holds neither of the two,
+    and the export names it and the values in the report. It gives whether the record changed."""
+    components = record['components']
+    light = components['DirectionalLight']
+    # The lamp holds the way it points as an angle of 32 bits, so the direction comes back a ten-thousandth away. A
+    # turn by hand is thousands of times wider than that.
+    changed = (sun_direction(o) - sun_towards(components)).length >= 1e-4
+    if changed:
+        components.setdefault('Transform', {}).update(light_values(o))
+    if o.data.type != 'SUN':
+        export.skip(o.name, f'the colour and the intensity of its directional light, which a {o.data.type.lower()} '
+                            'lamp of Blender does not hold: give the object a sun lamp again')
+        return changed
+    if all(same_value(part, was) for part, was in zip(lamp_illuminance(o), sun_illuminance(light))):
+        return changed
+    light.update(sun_light_values(o))
+    return True
+
+
+def changed_kind(export, record, kind, o):
+    """Writes back what a person changes at the values that Blender holds its own way: a lamp's colour, strength, bulb
+    and reach, the materials in the slots of a mesh, a marker's name and its tags, and the way a directional light was
+    turned with the light that it gives. It gives whether the record changed."""
     if kind == 'lamp':
         was = point_light_as_read(record['components']['PointLight'])
-        changed = {key: value for key, value in point_light_values(o).items() if not near(value, was[key])}
+        changed = {key: value for key, value in point_light_values(o).items() if not same_value(value, was[key])}
         if not changed:
-            return 0
+            return False
         record['components']['PointLight'].update(changed)
     elif kind == 'sun':
-        # The lamp holds the way it points as an angle of 32 bits, so the direction comes back a ten-thousandth
-        # away. A turn by hand is thousands of times wider than that.
-        components = record.get('components', {})
-        if (sun_direction(o) - read_sun(components['DirectionalLight'], components)[0]).length < 1e-4:
-            return 0
-        components.setdefault('Transform', {}).update(light_values(o))
+        return changed_sun(export, record, o)
+    elif kind == 'mesh':
+        materials, fault = slot_materials(o)
+        if fault or materials == record['components']['Renderer'].get('materials', []):
+            return False
+        record['components']['Renderer']['materials'] = materials
     elif kind == 'marker':
         name, tags = marker_values(o)
-        if name == record.get('name') and tags == [str(tag) for tag in record.get('tags', [])]:
-            return 0
+        if name == record.get('name', UNNAMED) and tags == [str(tag) for tag in record.get('tags', [])]:
+            return False
         record['name'] = name
         if tags or 'tags' in record:
             record['tags'] = tags
     else:
-        return 0
-    export.touch(where.file)
-    return 1
+        return False
+    return True
 
 
 def moved_record(export, where, world, destination):
@@ -527,7 +627,7 @@ def moved_record(export, where, world, destination):
     chunk that it stands in now."""
     file, corner = corner_of(export, where, world, destination)
     record = record_at(export.data(where.file), where.path)
-    record.setdefault('components', {})['Transform'] = transform_values(corner.inverted_safe() @ world)
+    set_place(record, corner, world)
     export.worlds[where] = world
     export.touch(where.file)
     if os.path.abspath(file) == os.path.abspath(where.file):
@@ -538,12 +638,14 @@ def moved_record(export, where, world, destination):
     export.report.removed += 1
 
 
-def copied_record(export, where, world, destination):
-    """A new entity for an object that a person copied: the same record, at the place of the copy. A copy of a
-    collection instance is a new instance of that prefab."""
+def copied_record(export, where, o, destination):
+    """A new entity for an object that a person copied: the same record, at the place of the copy, with the components
+    that the copy carries. A copy of a collection instance is a new instance of that prefab."""
+    world = world_of(o)
     file, corner = corner_of(export, where, world, destination)
     record = copy.deepcopy(record_at(export.data(where.file), where.path))
-    record.setdefault('components', {})['Transform'] = transform_values(corner.inverted_safe() @ world)
+    set_place(record, corner, world)
+    changed_components(export, record, o)
     export.add(file, record)
 
 
@@ -559,24 +661,27 @@ def export_group(export, objects, source, destination):
             continue
         record, fault = new_record(o)
         if fault:
-            export.skip(o, fault)
+            export.skip(o.name, fault)
             continue
-        file, corner = destination(world_of(o))
-        record.setdefault('components', {})['Transform'] = transform_values(corner.inverted_safe() @ world_of(o))
+        world = world_of(o)
+        file, corner = destination(world)
+        set_place(record, corner, world)
+        changed_components(export, record, o)
         export.add(file, record)
 
     # The records nearest the top come first, since a child stands where its parent puts it.
     for (where, kind), group in sorted(found.items(), key=lambda item: len(item[0][0].path)):
         placement = source[(where, kind)]
-        kept = [o for o in group if same_matrix(world_of(o), placement.world)] or [group[0]]
+        kept = next((o for o in group if same_matrix(world_of(o), placement.world)), group[0])
         for o in group:
-            if o is not kept[0]:
-                copied_record(export, where, world_of(o), destination)
-        export.report.changed += changed_values(export, where, kind, kept[0])
+            if o is not kept:
+                copied_record(export, where, o, destination)
+        export.report.changed += changed_values(export, where, kind, kept)
+        world = world_of(kept)
         # Magic reads a directional light's direction alone, so where its lamp stands writes nothing: changed_values
         # writes the way that a person turned it.
-        if kind != 'sun' and not same_matrix(world_of(kept[0]), placement.world):
-            moved_record(export, where, world_of(kept[0]), destination)
+        if kind != 'sun' and not same_matrix(world, placement.world):
+            moved_record(export, where, world, destination)
 
     # Each entity that no object stands for any more. An entity that puts more than one object in the scene goes only
     # when every one of them is gone.
@@ -588,8 +693,8 @@ def export_group(export, objects, source, destination):
         if not gone:
             continue
         if len(gone) < len(keys):
-            export.report.skipped.append((source[gone[0]].entity.get('name', 'entity'),
-                                          'its entity still puts another object in the scene, so the entity stays'))
+            export.skip(source[gone[0]].entity.get('name', UNNAMED),
+                        'its entity still puts another object in the scene, so the entity stays')
             continue
         export.dropped.add(where)
         export.touch(where.file)
@@ -630,7 +735,7 @@ def write_sky(export):
     for name in domain_prefabs(export.source):
         for record in export.data(os.path.join(export.source, name))['entities']:
             sky = record.get('components', {}).get('Sky')
-            if sky is not None and not near(brightness, sky.get('brightness', 1.0)):
+            if sky is not None and not same_value(brightness, sky.get('brightness', 1.0)):
                 sky['brightness'] = brightness
                 export.touch(os.path.join(export.source, name))
                 export.report.changed += 1
@@ -679,8 +784,10 @@ def write_files(export):
             shutil.copyfile(path + '.meta', out + '.meta')
         elif not os.path.isfile(out + '.meta'):
             made.append(out)
-    # Magic gives each new prefab its .meta, because it alone knows which id is free.
-    make_handles(export.scene['magic_project'], made)
+    # Magic gives each new prefab its .meta, because it alone knows which id is free, and the file stands in the
+    # project already, so Magic writes the .meta where it is and copies nothing.
+    if made:
+        run_magic(export.scene['magic_project'], ['import "%s"' % path for path in made])
     for path in sorted(export.touched | set(export.extra)):
         if os.path.dirname(path) == export.source:
             continue

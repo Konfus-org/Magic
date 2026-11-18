@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.CommandLine;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
@@ -23,6 +24,7 @@ public readonly record struct SkyInput(GpuView View);
 /// It hands on the sky's shader type each frame, with no tables while there are none. Shading and the indirect light
 /// take them. Without tables, they light the world with the open sky.
 /// </remarks>
+[CliPath("ProceduralSky")]
 public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoDomainLoading
 {
     private static readonly TextureDescription _transmittanceTable = GetTable("Sky transmittance", 256, 64);
@@ -64,6 +66,25 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
         _multiScatteringShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyMultiScattering");
         _viewShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyView");
         _skyType = [new ShaderTypeArgument(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere")];
+    }
+
+    /// <summary>
+    /// What the sky's light is multiplied by: the <c>Brightness</c> of the world's first sky entity, and 1 while no
+    /// entity has a sky. Game thread.
+    /// </summary>
+    /// <remarks>
+    /// A tool that lights the same scene reads <c>query ProceduralSky.Brightness</c> instead of reading the entity
+    /// files and picking one sky of its own.
+    /// </remarks>
+    public float Brightness
+    {
+        get
+        {
+            EcsSnapshot<Sky> skies = new();
+            skies.Fill(_ecs);
+
+            return skies.Count > 0 ? skies.First[0].Brightness : 1;
+        }
     }
 
     /// <summary>

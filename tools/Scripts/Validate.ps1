@@ -55,9 +55,10 @@ $PSNativeCommandUseErrorActionPreference = $false
 # The build's worker processes end with the build instead of lingering, one per core, for a quarter of an hour.
 $env:MSBUILDDISABLENODEREUSE = '1'
 
+. (Join-Path $PSScriptRoot 'RunLib.ps1')
+
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
-$magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 if ($Project.Count -eq 0) {
     $Project = @(Get-ChildItem (Join-Path $root 'samples') -Directory | ForEach-Object { Get-ChildItem $_.FullName -Filter '*.magic' } | Sort-Object FullName | ForEach-Object { $_.FullName })
     if ($Project.Count -eq 0) {
@@ -157,7 +158,7 @@ foreach ($step in $steps) {
     if ($Only -notcontains $step.Name) { continue }
     if ($step.Name -in 'Headless', 'Screenshot') {
         # Named here rather than at the start: on Windows it is Magic.exe, which the Build step may have just made.
-        if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
+        $magic = Get-MagicPath $Configuration
         if (-not (Test-Path $magic)) {
             Write-Output "There is no $magic to run: build first (tools/Scripts/Validate.ps1 -Only Build)."
             exit 1

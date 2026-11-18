@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.Text.Json.Nodes;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Debugging;
@@ -30,36 +29,27 @@ internal static class AssetQuery
             path,
             id,
         };
-        asset.SetAction(parsed => Print(parsed.GetValue(path), parsed.GetValue(id), parsed.GetValue(output)));
+        asset.SetAction(parsed => Print(parsed.GetValue(id) ?? parsed.GetValue(path), parsed.GetValue(output)));
 
         return asset;
 
-        void Print(string? asked, string? askedId, string? file)
+        void Print(string? asked, string? file)
         {
             if (!CommandLookups.IsProjectOpen(app, "look up an asset"))
                 return;
 
-            Result<IndexedFile> found = (askedId, asked) switch
+            if (asked is null)
             {
-                (not null, _) => CommandLookups.FindAssetById(assets, askedId),
-                (_, not null) => CommandLookups.FindAssetByPath(assets, asked),
-                _ => Result.Failure("give an asset's path, or its id as --id 300124."),
-            };
+                Log.Error("No asset was printed: give an asset's path, or its id as --id 300124.");
+
+                return;
+            }
+
+            Result<IndexedFile> found = CommandLookups.FindAsset(assets, asked);
             if (found.Ok)
-                CommandLookups.Print(files, file, Describe(found.Value), "The asset is in");
+                CommandLookups.Print(files, file, CommandLookups.DescribeAsset(found.Value), "The asset is in");
             else
                 Log.Error($"No asset was printed: {found.Error}");
         }
     }
-
-    /// <summary>
-    /// The id, the path and the type of <paramref name="asset"/>, as each command that names an asset prints them.
-    /// </summary>
-    public static JsonObject Describe(IndexedFile asset) =>
-        new()
-        {
-            ["id"] = asset.Id,
-            ["path"] = asset.Path,
-            ["type"] = asset.Type,
-        };
 }
