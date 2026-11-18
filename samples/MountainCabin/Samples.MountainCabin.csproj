@@ -3,7 +3,7 @@
   <PropertyGroup>
     <RunCommand>$(MagicBin)Magic</RunCommand>
     <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
-    <RunArguments>open "$(MSBuildProjectDirectory)/Terrain.magic" --headless true</RunArguments>
+    <RunArguments>open "$(MSBuildProjectDirectory)/MountainCabin.magic" --headless true</RunArguments>
     <RunWorkingDirectory>$(MagicRoot)</RunWorkingDirectory>
   </PropertyGroup>
   <ItemGroup>

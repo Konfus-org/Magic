@@ -10,7 +10,21 @@ holds the `Magic` program, the gems that come with it, the sample projects and t
 - To build the native libraries: git, CMake, Ninja and a C++ toolchain. On Windows, Visual Studio with its
   "Desktop development with C++" workload gives CMake, Ninja and the toolchain.
 
+## How to run
+
+Open a terminal in the root folder of the repository. Then build Magic and open the sample:
+
+```powershell
+dotnet build src/Magic.slnx
+dotnet run --project src/Core -- open samples/MountainCabin/MountainCabin.magic
+```
+
+The first build also builds the native libraries, so it takes some minutes. To end the run, close the window or type
+`exit` into the terminal.
+
 ## Build and run
+
+The general form of these commands is:
 
 ```powershell
 dotnet build src/Magic.slnx

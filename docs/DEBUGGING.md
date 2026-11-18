@@ -130,7 +130,7 @@ second. A gauge shows its last value.
 
 A reference view is a fixed camera in a sample project, with hours and named points, where Magic's light is measured
 against a render of the same scene in Blender Cycles. The hours and the points are in
-`tools/Scripts/ReferenceViews.json`, under the view's name. The cabin of the Terrain sample holds every view. The
+`tools/Scripts/ReferenceViews.json`, under the view's name. The cabin of the MountainCabin sample holds every view. The
 faults that these pictures must reject are in the [rendering skill](skills/rendering/SKILL.md).
 
 The Blender add-on in `tools/Blender/magic_domain` builds the scene from the files that Magic loads: the domain's

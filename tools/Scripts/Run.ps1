@@ -35,7 +35,7 @@ window opens on the main one.
 The window's name: the worktree's branch, the session's name, when left out.
 
 .EXAMPLE
-tools/Scripts/Run.ps1 -Project samples/Terrain/Terrain.magic
+tools/Scripts/Run.ps1 -Project samples/MountainCabin/MountainCabin.magic
 
 .EXAMPLE
 tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'query player.transform', 'exit'
@@ -44,7 +44,7 @@ tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'query player.transform
 param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
-    [string] $Project = 'samples/Terrain/Terrain.magic',
+    [string] $Project = 'samples/MountainCabin/MountainCabin.magic',
     [string[]] $Commands = @(),
     [switch] $Headless,
     [ValidateRange(1, [int]::MaxValue)]

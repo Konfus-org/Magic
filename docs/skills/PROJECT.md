@@ -120,7 +120,7 @@ Read `magic.core.*`, `magic.gems.<gem>.*` and `dotnet.*`.
 The [rendering skill](rendering/SKILL.md) and its [fault list](rendering/FAULTS.md) use these values.
 
 - **The reference:** Blender Cycles, through the reference scene script.
-- **The test scene:** the Cabin domain of `samples/Terrain/Terrain.magic`.
+- **The test scene:** the Cabin domain of `samples/MountainCabin/MountainCabin.magic`.
 
 ### Files
 
@@ -214,7 +214,7 @@ A gem adds a subject of `query` or a command of its own through `ConsoleCommands
 Each `query` takes `--out <file>`. Get the JSON from a headless run:
 
 ```powershell
-tools/Scripts/Run.ps1 -Headless -Project samples/Terrain/Terrain.magic -Commands 'wait loaded', 'query domain --tags render-reference --out views.json', 'exit'
+tools/Scripts/Run.ps1 -Headless -Project samples/MountainCabin/MountainCabin.magic -Commands 'wait loaded', 'query domain --tags render-reference --out views.json', 'exit'
 ```
 
 `query` and `set` reach one entity by its tag or by its id, never by its name, and a tag is case sensitive.

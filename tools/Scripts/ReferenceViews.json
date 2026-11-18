@@ -1,7 +1,7 @@
 [
   {
     "name": "cabin-wall",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.CabinWall",
     "hours": [8, 12, 16, 22],
     "points": [
@@ -15,7 +15,7 @@
   },
   {
     "name": "cabin-window-glow",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.CabinWindowGlow",
     "hours": [8, 12, 16, 22],
     "points": [
@@ -28,7 +28,7 @@
   },
   {
     "name": "cabin-room",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.CabinRoom",
     "hours": [8, 12, 16, 22],
     "strafe": {"meters": 1.5, "seconds": 2},
@@ -42,7 +42,7 @@
   },
   {
     "name": "cabin-outside",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.CabinOutside",
     "hours": [8, 12, 16, 22],
     "points": [
@@ -55,7 +55,7 @@
   },
   {
     "name": "cabin-trees",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.CabinTrees",
     "hours": [8, 12, 16, 22],
     "points": [
@@ -69,7 +69,7 @@
   },
   {
     "name": "cabin-surfaces",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.CabinSurfaces",
     "hours": [8, 12, 16, 22],
     "strafe": {"meters": 1.5, "seconds": 2},
@@ -84,7 +84,7 @@
   },
   {
     "name": "leak-room",
-    "project": "samples/Terrain/Terrain.magic",
+    "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.LeakRoom",
     "hours": [8, 12, 16, 22],
     "points": [

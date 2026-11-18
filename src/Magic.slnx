@@ -50,9 +50,9 @@
   </Folder>
   <Folder Name="/Samples/">
   </Folder>
-    <Folder Name="/Samples/Terrain/">
-      <File Path="../samples/Terrain/Terrain.magic" />
-      <Project Path="../samples/Terrain/Samples.Terrain.csproj" />
+    <Folder Name="/Samples/MountainCabin/">
+      <File Path="../samples/MountainCabin/MountainCabin.magic" />
+      <Project Path="../samples/MountainCabin/Samples.MountainCabin.csproj" />
     </Folder>
   <Folder Name="/Samples/Shared/">
     <Project Path="../samples/Shared/SamplesShared.csproj" />

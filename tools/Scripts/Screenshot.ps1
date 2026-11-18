@@ -65,7 +65,7 @@ tools/Scripts/Screenshot.ps1
 tools/Scripts/Screenshot.ps1 -Commands 'set DeferredRendering.RenderView Normal'
 
 .EXAMPLE
-tools/Scripts/Screenshot.ps1 -Project samples/Terrain/Terrain.magic
+tools/Scripts/Screenshot.ps1 -Project samples/MountainCabin/MountainCabin.magic
 
 .EXAMPLE
 tools/Scripts/Screenshot.ps1 -AllowErrors -Window
@@ -78,7 +78,7 @@ param(
     [int] $Settle = 20,
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Seconds = 600,
-    [string] $Project = 'samples/Terrain/Terrain.magic',
+    [string] $Project = 'samples/MountainCabin/MountainCabin.magic',
     [string[]] $Commands = @(),
     [string[]] $Domains = @(),
     [string] $Name,

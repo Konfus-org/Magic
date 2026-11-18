@@ -4,7 +4,7 @@ Flies the camera in through the cabin's open door, turns it to each wall, and fl
 of day, and prints the screenshots' paths.
 
 .DESCRIPTION
-One run of samples/Terrain through tools/Scripts/Run.ps1, which opens the Cabin domain. The run holds the player
+One run of samples/MountainCabin through tools/Scripts/Run.ps1, which opens the Cabin domain. The run holds the player
 still, then, for each hour of -Hours, holds the sun at that hour and the moon opposite it, and sends the camera
 along the way: outside the door, a step nearer, the doorway, the middle of the room at four headings 90 degrees apart,
 the floor under the window, and back out through the door. The steps between the stops show what a move does to
@@ -12,7 +12,7 @@ the picture.
 
 At each stop the run waits -Settle seconds for the exposure and the light to settle, takes a screenshot, and waits
 -Write seconds for it to be written. The output is the paths of the screenshots, in the order they were taken, so a
-caller can keep them: $png = samples/Terrain/FlyThrough.ps1. Open each one and look at it: a screenshot that was
+caller can keep them: $png = samples/MountainCabin/FlyThrough.ps1. Open each one and look at it: a screenshot that was
 taken is not one that shows the lighting working.
 
 Needs a build (tools/Scripts/Validate.ps1 -Only Build), a display and a GPU. Runs from any current directory.
@@ -37,10 +37,10 @@ How many seconds pass after each screenshot, for the frame to be read back and w
 The longest the run may last, in seconds. A run still going then is killed.
 
 .EXAMPLE
-samples/Terrain/FlyThrough.ps1
+samples/MountainCabin/FlyThrough.ps1
 
 .EXAMPLE
-samples/Terrain/FlyThrough.ps1 -Hours 12
+samples/MountainCabin/FlyThrough.ps1 -Hours 12
 #>
 [CmdletBinding()]
 param(
@@ -121,7 +121,7 @@ foreach ($hour in $Hours) {
 $lines += 'wait 10s'
 
 $runner = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tools/Scripts/Run.ps1'
-$output = & $runner -Configuration $Configuration -Project 'samples/Terrain/Terrain.magic' -Seconds $Seconds -Commands ($lines + 'exit')
+$output = & $runner -Configuration $Configuration -Project 'samples/MountainCabin/MountainCabin.magic' -Seconds $Seconds -Commands ($lines + 'exit')
 $code = $LASTEXITCODE
 $shots = @($output | Where-Object { $_ -match '\.png$' })
 

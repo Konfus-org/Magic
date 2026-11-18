@@ -2,7 +2,7 @@
   "profiles": {
     "Magic": {
       "commandName": "Project",
-      "commandLineArgs": "open samples/Terrain/Terrain.magic --headless True",
+      "commandLineArgs": "open samples/MountainCabin/MountainCabin.magic --headless True",
       "workingDirectory": "$(ProjectDir)../.."
     }
   }
