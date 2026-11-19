@@ -9,7 +9,7 @@ Use this skill for any work on what Magic draws. Start with the line that fits t
 
 | The work | Start with |
 | --- | --- |
-| A change to the renderer, a shader, a material, or the light of a scene | [The order of priority](#1-the-order-of-priority) and [The rules](#6-the-rules). The visual tests must pass before you show the change. |
+| A change to the renderer, a shader, a material, or the light of a scene | [The order of priority](#1-the-order-of-priority) and [The rules](#6-the-rules). The [Verification loop](#7-verification-loop) must come clean and the visual tests must pass before you show the change. |
 | A picture that looks wrong | The fault in [FAULTS.md](FAULTS.md). Then find its cause with the [investigate skill](../investigate/SKILL.md). |
 | GPU time, VRAM or frame time | The [profiling skill](../profiling/SKILL.md). The GPU time row of the visual tests is a number to report, with no limit. |
 | A review, a plan or a question | The bar, the rules and the fault list. Name the view, the hour and the number that you read. |
@@ -31,6 +31,9 @@ flowchart TD
     Check --> User[Show the user the pictures]
 ```
 
+The [Verification loop](#7-verification-loop) runs inside the Fix and Check steps: the build, the validation layer and,
+when a pass is the cause, a RenderDoc capture come before the visual tests.
+
 ## 1. The order of priority
 
 Rules can pull two ways. When they do, the rule higher in this list wins.
@@ -47,7 +50,7 @@ Rules can pull two ways. When they do, the rule higher in this list wins.
    fails the fix, also when that row still passes its limit. The limits stay the goal: a run of all SAME rows that
    still fails a limit is not done ([The one command](#4-the-one-command)).
 5. **The look of the picture is the user's decision.** The user picks a strength, a radius, a tonemap, an exposure,
-   a grade, a pass limit and a new dependency ([Decisions that are the user's](#10-decisions-that-are-the-users)).
+   a grade, a pass limit and a new dependency ([Decisions that are the user's](#11-decisions-that-are-the-users)).
 6. **Where this skill is stricter than [PROJECT.md](../PROJECT.md) or another skill, follow this skill, and say
    which rule is stricter.** This skill permits nothing that they forbid. It is stricter in three places: a leak is
    an automatic fail, a fix needs a run that proved its cause, and you never call a picture right before the user
@@ -266,7 +269,69 @@ alone:
 The first rendering task that uses this skill runs the Quick tier on one view first and reads the report. Report
 what it printed before you read any other number.
 
-## 7. Reproduce
+## 7. Verification loop
+
+Run this loop for each change to rendering code, shaders included. Do the steps in order. A step that finds a fault
+sends you back to the build after the fix. The commands are in [PROJECT.md](../PROJECT.md) and
+[DEBUGGING.md](../../DEBUGGING.md).
+
+```mermaid
+flowchart TD
+    Pin[1. Read the invariants] --> Build[2. Build and first run]
+    Build --> Val[3. Debug run with validation and sync validation]
+    Val -- VUID or SYNC-HAZARD --> Fix[Fix at the cause]
+    Fix --> Build
+    Val --> Look[4. Look at the stage alone]
+    Look -- cause is inside a pass --> Cap[5. RenderDoc capture]
+    Cap --> Fix
+    Look --> Tests[6. Visual tests]
+```
+
+1. **Pin the invariants.** Before you change rendering code, read the
+   [Engine invariants](../PROJECT.md#engine-invariants) table. A change to one row is the user's decision.
+2. **Build.** A shader compiles when the first run asks for its entry point, through the Slang API, with warnings as
+   errors ([ShaderCompiler.cs:639-653](../../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L639)). A failed
+   compile logs one error: `The passes that run <entry point> are left out: <the compiler's text>`
+   ([VulkanShaders.cs:246](../../../src/Gems/VulkanGraphics/VulkanShaders.cs#L246)). The compiler's text starts with
+   `<path> does not compile`, `the program does not link` or `the entry does not compile to SPIR-V`
+   ([ShaderCompiler.cs:540-548](../../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L540),
+   [ShaderCompiler.cs:704](../../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L704)). That entry point stays
+   failed and its passes do not run. So a build that passes proves no shader compiles: read the log of a run that
+   reaches each entry point that you changed.
+3. **Run in Debug with validation and sync validation on.** Set `Debug.IsSyncValidationOn=true`
+   ([Vulkan validation](../../DEBUGGING.md#vulkan-validation)). Read the `GPU:` line of the log first: it must end
+   with `validating with sync validation`. If it does not, the loader did not find the layer: fix that and run again.
+   A run that did not validate proves nothing. Each `Log.Error` with a message ID in brackets, such as a `VUID-` or a `SYNC-HAZARD-` ID, is a
+   fault ([Validation error or sync hazard](FAULTS.md#a-validation-error-or-sync-hazard)). Fix it at its cause
+   before you trust a picture. A barrier comes from what a pass declares that it reads and writes, so the cause is
+   usually a wrong declaration, not a missing barrier.
+4. **Look at the stage alone.** Show one part of the frame with `DeferredRendering.RenderView`, and read the light
+   before the exposure with `screenshot --hdr` ([PROJECT.md](../PROJECT.md), Debug views and switches).
+5. **Capture, when the cause is inside a pass.** Use it for a wrong barrier, target or state, when steps 3 and 4 name
+   no cause. The `capture` command works only when RenderDoc started Magic
+   ([RenderDoc capture](../../DEBUGGING.md#renderdoc-capture)). RenderDoc is a tool that the user installs and starts,
+   as the [profiling skill](../profiling/SKILL.md) says. Ask the user first, with the exact steps. Then read the
+   capture file, in this order:
+   - The pixel history of the wrong pixel: which draw or dispatch wrote it
+     (`ReplayController.PixelHistory` in the
+     [RenderDoc Python API](https://renderdoc.org/docs/python_api/renderdoc/replay.html)).
+   - The inputs and outputs of that pass: its textures and buffers, and whether the one that you expect is bound.
+   - The pipeline state of that pass (`ReplayController.GetPipelineState`, same page): depth test, blend, targets and
+     formats.
+
+   To read the file from a script, use RenderDoc's Python module. RenderDoc does not ship it ready to import: it is
+   built for one Python version, and it needs `renderdoc.dll` on the path
+   ([Python module](https://renderdoc.org/docs/python_api/python_module.html)). `rdc-cli`
+   ([rdc-cli](https://github.com/BANANASJIM/rdc-cli), used by the
+   [renderdoc-skill](https://github.com/rudybear/renderdoc-skill)) and
+   [renderdoc-mcp](https://github.com/Linkingooo/renderdoc-mcp) wrap that module for an agent. Both are third-party.
+   Each one is a new dependency, and needs the user's yes.
+6. **Run the visual tests** ([The one command](#4-the-one-command)), and read [FAULTS.md](FAULTS.md) again.
+
+The loop does not prove a picture right. Steps 2 to 5 find faults that the eye cannot see. Step 6 and the user's
+look judge the picture.
+
+## 8. Reproduce
 
 1. Name the fault, the view and the hour from [FAULTS.md](FAULTS.md).
 2. Run the visual tests for that view and that hour.
@@ -275,7 +340,7 @@ what it printed before you read any other number.
 5. If no view shows the fault, add a view ([Reference views](../../DEBUGGING.md#reference-views)). Never pose a
    camera in a scratch script. The next agent must measure the same thing.
 
-## 8. Find the cause
+## 9. Find the cause
 
 Follow the [investigate skill](../investigate/SKILL.md). This skill is stricter in two ways:
 
@@ -288,7 +353,7 @@ Use the debug views and the switches that turn off one term of the light ([PROJE
 exists for the stage, add one for the measurement. Write the cause in one sentence, with its file and line, before
 you change code.
 
-## 9. Fix and check
+## 10. Fix and check
 
 - Fix the stage that makes the fault. Do not hide it in a later stage.
 - Prefer a proven technique or library over a new one of our own: a known denoiser, a known ambient occlusion, a
@@ -305,7 +370,7 @@ hours:
 2. Before you show the work to the user, run the Full tier one time for every view and hour, and read the whole
    table of [FAULTS.md](FAULTS.md). Look at each picture at full size.
 
-## 10. Decisions that are the user's
+## 11. Decisions that are the user's
 
 The look of the picture belongs to the user. Do not choose these for them:
 
@@ -316,7 +381,7 @@ The look of the picture belongs to the user. Do not choose these for them:
 
 Ask with two to four choices, the recommended one first, each with a picture and its measured cost.
 
-## 11. Report
+## 12. Report
 
 Give the user:
 

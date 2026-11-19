@@ -1,4 +1,5 @@
 using Magic.CommandLine;
+using Magic.Events;
 using Magic.Graphics;
 using Magic.Platform;
 using Magic.Projects;
@@ -7,8 +8,8 @@ using Magic.Threading;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// The gem: it makes the <see cref="GraphicsApi"/> over its <see cref="Settings"/>, and adds the <c>gpu</c> subject of
-/// <c>query</c>, which prints the GPU that draws.
+/// The gem: it makes the <see cref="GraphicsApi"/> over its <see cref="Settings"/>, adds the <c>gpu</c> subject of
+/// <c>query</c>, which prints the GPU that draws, and gives the graphics API each RenderDoc capture asked for.
 /// </summary>
 public sealed class EntryPoint : IGem, IDisposable
 {
@@ -38,4 +39,12 @@ public sealed class EntryPoint : IGem, IDisposable
     public GraphicsApi GraphicsApi { get; }
 
     public void Dispose() => GraphicsApi.Dispose();
+
+    public void Update(in Frame frame)
+    {
+        foreach (CaptureRequested asked in frame.Events.Get<CaptureRequested>())
+        {
+            GraphicsApi.Capture(asked);
+        }
+    }
 }

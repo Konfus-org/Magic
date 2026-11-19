@@ -293,8 +293,11 @@ settings of the gem are in `VulkanGraphicsSettings`. `query Window` and `query R
 
 #### Debug and measurements
 
-- In a Debug build, if the Vulkan SDK is installed, the gem turns on the Khronos validation layer. It logs what the
-  layer reports.
+- In a Debug build, or with the setting `Debug.IsSyncValidationOn`, the gem turns on the Khronos validation layer if
+  the Vulkan loader finds it. It logs what the layer reports ([Vulkan validation](DEBUGGING.md#vulkan-validation)).
+- When RenderDoc started Magic, the gem captures the frames that the `capture` command asks for
+  ([RenderDoc capture](DEBUGGING.md#renderdoc-capture)). `RenderDoc.cs` binds by hand the calls that the gem makes,
+  by their indices in the function table of `renderdoc_app.h`.
 - The gem publishes the GPU time of each pass and each frame, and the memory, on its `Magic.Gems.VulkanGraphics` meter.
   The tags of the meter name the Vulkan version, the GPU, its kind and its driver.
 - The memory in use is what the driver says that the process holds on the GPU, if the driver has

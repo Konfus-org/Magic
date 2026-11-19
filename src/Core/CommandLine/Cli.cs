@@ -60,6 +60,7 @@ internal sealed class Cli
                 OpenCommand.Create(app, files, assets, world, _queue),
                 NewCommand.Create(app, files, assets, _queue),
                 ScreenshotCommand.Create(app, files, events),
+                CaptureCommand.Create(app, files, events),
                 SaveCommand.Create(app, settings, world, _queue),
                 LoadCommand.Create(app, world, _queue),
                 BakeCommand.Create(app, assets, _queue),

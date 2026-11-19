@@ -2,7 +2,9 @@ using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Graphics;
 using Magic.Platform;
 using Magic.Threading;
@@ -74,6 +76,23 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
 
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
+    /// <summary>
+    /// The RenderDoc that started Magic, or null when none did.
+    /// </summary>
+    private readonly RenderDoc? _renderDoc;
+
+    /// <summary>
+    /// The captures asked for and not yet started, which the render thread starts one at a time.
+    /// </summary>
+    private readonly Channel<CaptureRequested> _captures = Channel.CreateUnbounded<CaptureRequested>(
+        new UnboundedChannelOptions { SingleReader = true }
+    );
+
+    /// <summary>
+    /// How many frames the capture that runs still takes: 0 when none runs. Render thread.
+    /// </summary>
+    private int _captureFramesLeft;
+
     internal GraphicsApi(
         VulkanGraphicsSettings settings,
         App app,
@@ -85,7 +104,12 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         _settings = settings;
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
-        _device = new VulkanDevice(drawn, settings.Gpu, wantsValidation: IsDebugBuild);
+        _device = new VulkanDevice(
+            drawn,
+            settings.Gpu,
+            wantsValidation: IsDebugBuild || settings.IsSyncValidationOn,
+            wantsSyncValidation: settings.IsSyncValidationOn
+        );
 
         // The gem's meter goes with it, so nothing holds the gem's code once it unloads.
         _meter = new Meter(new MeterOptions("Magic.Gems.VulkanGraphics") { Tags = _device.Description });
@@ -113,6 +137,7 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         _frames = new VulkanFrames(_device, _resources, _meter);
         _shaders = new VulkanShaders(compiler, _resources, _frames, threads);
         _recorder = new VulkanRecorder(_device, _resources, _heap, _shaders);
+        _renderDoc = RenderDoc.Find(_device.Instance);
         if (drawn is not null && _device.Surface.IsNotNull)
             _swapchain = new VulkanSwapchain(_device, _resources, drawn);
 
@@ -135,6 +160,10 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
 
     public void Dispose()
     {
+        // A capture that is still open ends first: RenderDoc leaves overlapping captures undefined.
+        if (_captureFramesLeft > 0 && _renderDoc is not null)
+            EndCapture(_renderDoc);
+
         _shaders.Dispose();
         _swapchain?.Dispose();
         _frames.Dispose();
@@ -296,12 +325,29 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             _memoryUsage.Record(usage, _memorySource);
         }
 
+        StepCapture();
         BeginFrame();
     }
 
     /// <summary>
+    /// Asks RenderDoc to capture the frames that <paramref name="asked"/> names, from the next frame that begins. Any
+    /// thread.
+    /// </summary>
+    internal void Capture(in CaptureRequested asked)
+    {
+        if (_renderDoc is null)
+        {
+            Log.Info("RenderDoc is not attached, so nothing was captured: start Magic from RenderDoc to capture.");
+
+            return;
+        }
+
+        _captures.Writer.TryWrite(asked);
+    }
+
+    /// <summary>
     /// The GPU that draws, as <c>query gpu</c> prints it: the tags of the gem's meter, the device memory and whether
-    /// the API validates.
+    /// the API validates, also for hazards between commands.
     /// </summary>
     internal JsonObject Describe()
     {
@@ -315,8 +361,21 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
 
         described["memoryBytes"] = _device.Limits.DeviceMemoryBytes;
         described["isValidating"] = _device.HasValidation;
+        described["isSyncValidating"] = _device.HasSyncValidation;
 
         return described;
+    }
+
+    /// <summary>
+    /// Ends the running capture and logs where RenderDoc wrote it, or why it did not.
+    /// </summary>
+    private static void EndCapture(RenderDoc renderDoc)
+    {
+        Result<string> captured = renderDoc.End();
+        if (captured.Ok)
+            Log.Info($"RenderDoc wrote the capture {captured.Value}");
+        else
+            Log.Error($"The capture was not written: {captured.Error}");
     }
 
     private void Destroy(GpuBuffer buffer)
@@ -341,6 +400,25 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     {
         if (_resources.Accelerations.Remove(acceleration.Id) is { } removed)
             _frames.Current.Trash.Add(new(acceleration.Id, removed));
+    }
+
+    /// <summary>
+    /// Between two frames: ends the capture that runs after its last frame, then starts the next capture asked for, so
+    /// that each capture holds whole frames.
+    /// </summary>
+    private void StepCapture()
+    {
+        if (_renderDoc is null)
+            return;
+
+        if (_captureFramesLeft > 0 && --_captureFramesLeft == 0)
+            EndCapture(_renderDoc);
+
+        if (_captureFramesLeft == 0 && _captures.Reader.TryRead(out CaptureRequested asked))
+        {
+            _renderDoc.Start(asked.PathTemplate);
+            _captureFramesLeft = asked.Frames;
+        }
     }
 
     private void BeginFrame()

@@ -26,6 +26,10 @@ Runs without a window, and ends the run at the first error logged.
 .PARAMETER Seconds
 The longest the run may last, in seconds: a ceiling, not a wait. A run still going then is killed.
 
+.PARAMETER Configure
+Settings that the run starts with, as `Category.Member=value`, such as `Debug.IsSyncValidationOn=true`. Magic gets them
+with `--configure`.
+
 .PARAMETER Display
 The display that the window opens on, by its place in SDL's list of displays, where the main display is first. The
 default, 1, is the display after the main one, so that the run does not cover the user's work. With one display, the
@@ -48,6 +52,7 @@ param(
     [string] $Project = 'samples/MountainCabin/MountainCabin.magic',
     [string[]] $Commands = @(),
     [switch] $Headless,
+    [string[]] $Configure = @(),
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Seconds = 600,
     [ValidateRange(0, [int]::MaxValue)]
@@ -84,9 +89,10 @@ if ($Headless) {
     $Display = Limit-Display $Display
     # The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
     # SDL reads the hint from the environment, and Magic inherits it.
-    $arguments += @('--configure', "Window.Display=$Display")
+    $Configure += "Window.Display=$Display"
     $env:SDL_WINDOW_ACTIVATE_WHEN_SHOWN = '0'
 }
+if ($Configure.Count -gt 0) { $arguments += @('--configure') + ($Configure | ForEach-Object { "`"$_`"" }) }
 
 # Magic runs with its console lines, its output and its log in files, so a run still going after -Seconds can be
 # killed. The log is shown as it comes; the output is written once the run ends.

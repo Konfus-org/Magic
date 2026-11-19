@@ -45,6 +45,7 @@ switches are in the Rendering part of [PROJECT.md](../PROJECT.md).
 | [Impostors and far geometry](#impostors-and-far-geometry) | Foliage that goes flat or black past a distance | The tree view at full size, still and in motion | A visible switch to an impostor fails |
 | [Faceted or wrong light on a mesh](#faceted-or-wrong-light-on-a-mesh) | Facets on a curve, a lit gradient on a shadowed face | The split picture, the `Normal` debug view | Shading that the model's normals cause fails |
 | [Resource warnings](#resource-warnings) | Light where it cannot be, at random runs | The log row of the visual tests | One warning or error in the log fails |
+| [A validation error or sync hazard](#a-validation-error-or-sync-hazard) | Nothing, or a fault that shows on one GPU or one driver only | A Debug run with sync validation on, and the log row of the visual tests | One `VUID-` or `SYNC-HAZARD-` line fails |
 | [Floating or sunk objects](#floating-or-sunk-objects) | A trunk in the air, or a model that sinks into the ground | A low picture at ground level, the overlay | A trunk that floats, or a sink deeper than the ground's rise across it, fails |
 | [Measurement faults](#measurement-faults) | Numbers that do not mean what they say | The checks in that part | A number from a broken measurement proves nothing |
 
@@ -590,6 +591,19 @@ The user's rule: light and shadows must not depend on where the camera looks. On
 - **Reject rule:** one warning or error in the log fails the whole run. Fix the warning first. A run with a warning
   is not a valid picture, and its numbers prove nothing.
 - **Cause proved:** the traced depth was asked in two formats (`7ded0b11`).
+
+### A validation error or sync hazard
+
+- **Looks like:** often nothing. The picture is right on one GPU and wrong, flickering or black on another, or only at
+  some runs. A missing barrier makes a read see old data or a half-written resource.
+- **Test:** a Debug run with `Debug.IsSyncValidationOn=true`, read as in the
+  [Verification loop](SKILL.md#7-verification-loop). The `GPU:` line of the log must end with
+  `validating with sync validation`. The log row of the visual tests also counts each error.
+- **Reject rule:** one log line with a `VUID-` or `SYNC-HAZARD-` ID fails the change, also when the picture looks
+  right. A run that did not validate proves nothing. Never hide the line: not with a suppressed message, a barrier
+  that you write by hand, or a wait. Fix the cause.
+- **Cause to look at first:** the reads and writes that the pass declares. The GPU provider derives each barrier from
+  them ([Engine invariants](../PROJECT.md#engine-invariants), Barriers).
 
 ### Floating or sunk objects
 

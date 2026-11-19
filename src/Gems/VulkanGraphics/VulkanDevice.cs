@@ -56,7 +56,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     private readonly VkDebugUtilsMessengerEXT _messenger;
 
-    public VulkanDevice(IWindow? window, string gpu, bool wantsValidation)
+    public VulkanDevice(IWindow? window, string gpu, bool wantsValidation, bool wantsSyncValidation)
     {
         VkResult started = vkInitialize();
         if (started != VkResult.Success)
@@ -84,6 +84,19 @@ internal sealed unsafe class VulkanDevice : IDisposable
         try
         {
             HasValidation = wantsValidation && HasLayer(ValidationLayer);
+            if (wantsValidation && !HasValidation)
+            {
+                string message =
+                    $"Vulkan does not validate: the loader finds no {ValidationLayer}. Install the Vulkan SDK, "
+                    + "or set VK_ADD_LAYER_PATH to the Bin folder of an SDK that the loader does not know.";
+                // A warning only when a setting that the user turned on does nothing.
+                if (wantsSyncValidation)
+                    Log.Warn(message);
+                else
+                    Log.Info(message);
+            }
+
+            HasSyncValidation = wantsSyncValidation && HasValidation;
             HashSet<string> instanceExtensions = GetInstanceExtensions();
             HasDebugUtils = instanceExtensions.Contains(DebugUtilsExtension);
             bool hasPortability = instanceExtensions.Contains(PortabilityEnumerationExtension);
@@ -94,8 +107,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
             if (hasPortability)
                 wantedExtensions.Add(PortabilityEnumerationExtension);
 
-            // The full-screen-exclusive device extension needs it.
-            hasSurfaceCapabilities2 = instanceExtensions.Contains(SurfaceCapabilities2Extension);
+            // The full-screen-exclusive device extension needs it, and it needs a window's surface extensions.
+            hasSurfaceCapabilities2 =
+                handle.System != WindowSystem.None && instanceExtensions.Contains(SurfaceCapabilities2Extension);
             if (hasSurfaceCapabilities2)
                 wantedExtensions.Add(SurfaceCapabilities2Extension);
 
@@ -143,7 +157,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
             new("magic.gems.vulkan_graphics.device.type", GetKindName(picked.Kind)),
             new("magic.gems.vulkan_graphics.driver", picked.Driver),
         ];
-        Log.Info($"GPU: {Limits.DeviceName}, {api}{(HasValidation ? ", validating" : string.Empty)}.");
+        string validating =
+            HasSyncValidation ? ", validating with sync validation"
+            : HasValidation ? ", validating"
+            : string.Empty;
+        Log.Info($"GPU: {Limits.DeviceName}, {api}{validating}.");
     }
 
     public VkInstance Instance { get; }
@@ -177,6 +195,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
     public float TimestampPeriod { get; }
 
     public bool HasValidation { get; }
+
+    /// <summary>
+    /// Whether the validation layer also looks for hazards between commands, such as a missing barrier.
+    /// </summary>
+    public bool HasSyncValidation { get; }
 
     /// <summary>
     /// The API and the GPU, as the tags of the gem's meter: the API's version, the device's name and kind, and its
@@ -257,7 +280,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
         void* user
     )
     {
-        string message = $"Vulkan {types}: {CString.Read(data->pMessage)}";
+        // The message ID, such as SYNC-HAZARD-READ-AFTER-WRITE, is not in the text of a sync validation message.
+        string message = $"Vulkan {types} [{CString.Read(data->pMessageIdName)}]: {CString.Read(data->pMessage)}";
         if (severity.HasFlag(VkDebugUtilsMessageSeverityFlagsEXT.Error))
             Log.Error(message);
         else if (severity.HasFlag(VkDebugUtilsMessageSeverityFlagsEXT.Warning))
@@ -333,6 +357,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         using NativeStrings extensionNames = new(extensions);
         using NativeStrings layerNames = new(HasValidation ? [ValidationLayer] : []);
         fixed (byte* applicationName = "Magic\0"u8)
+        fixed (byte* syncSettingName = "validate_sync\0"u8)
         {
             VkApplicationInfo application = new()
             {
@@ -341,6 +366,22 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 apiVersion = VkVersion.Version_1_3,
             };
             VkDebugUtilsMessengerCreateInfoEXT messenger = GetMessengerInfo();
+            // The validation layer reads validate_sync from the chain, through VK_EXT_layer_settings.
+            VkBool32 isOn = true;
+            VkLayerSettingEXT syncValidation = new()
+            {
+                pLayerName = HasValidation ? layerNames.Pointers[0] : null,
+                pSettingName = syncSettingName,
+                type = VkLayerSettingTypeEXT.Bool32,
+                valueCount = 1,
+                pValues = &isOn,
+            };
+            VkLayerSettingsCreateInfoEXT settings = new()
+            {
+                settingCount = 1,
+                pSettings = &syncValidation,
+                pNext = HasDebugUtils ? &messenger : null,
+            };
             VkInstanceCreateInfo createInfo = new()
             {
                 pApplicationInfo = &application,
@@ -350,7 +391,10 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 enabledLayerCount = layerNames.Count,
                 ppEnabledLayerNames = layerNames.Pointers,
                 // The messenger in the chain catches what the instance's own creation reports.
-                pNext = HasValidation && HasDebugUtils ? &messenger : null,
+                pNext =
+                    HasSyncValidation ? &settings
+                    : HasValidation && HasDebugUtils ? &messenger
+                    : null,
             };
             vkCreateInstance(&createInfo, out VkInstance instance).ThrowIfFailed("an instance");
 

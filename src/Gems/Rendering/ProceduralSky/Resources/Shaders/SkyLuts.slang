@@ -63,13 +63,21 @@ void FillSkyMultiScattering(uint3 group : SV_GroupID, uint direction : SV_GroupI
     target.Store(group.xy, float4(luminance / max(1.0 - multi, Epsilon), 1.0));
 }
 
+// The value of each half float in the low 16 bits, exact for each normal half. Do not use f16tof32: Slang makes it
+// with 16-bit types, which need GPU features that Magic does not turn on. The bits move into a float's place, and the
+// multiplication by 2^112 corrects the exponent bias.
+float3 HalfToFloat(uint3 bits)
+{
+    return asfloat(((bits & 0x8000u) << 16u) | ((bits & 0x7FFFu) << 13u)) * 5.192296858534828e33;
+}
+
 // The gain on each channel that fits the sky to Blender's: the header's two halves of each channel, the gain and its
 // change by the light's height, over the light's colour, which Blender's sky does not take.
 float3 GetCalibration(Lights lights)
 {
     PassHeader header = GetPassHeader();
     uint3 packed = uint3(header.y, header.z, header.w);
-    float3 gain = f16tof32(packed & 0xFFFFu) + f16tof32(packed >> 16u) * saturate(lights.sunDirection.y);
+    float3 gain = HalfToFloat(packed & 0xFFFFu) + HalfToFloat(packed >> 16u) * saturate(lights.sunDirection.y);
     float3 light = lights.sunIlluminance.rgb;
     return gain * (Max3(light) > 0.0 ? Max3(light) / max(light, float3(Epsilon)) : float3(1.0));
 }

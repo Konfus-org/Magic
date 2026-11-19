@@ -65,6 +65,53 @@ Core reports two failures itself, each as a line of the banner:
 - A gem whose step takes an input that no listed gem makes.
 - A gem that threw in `Render`. Core runs that step again after a pause of a few seconds.
 
+## Vulkan validation
+
+The Khronos validation layer checks each Vulkan call of the VulkanGraphics gem. The log gets one `Log.Error` for each
+error that the layer finds. The message ID is in brackets, as `[SYNC-HAZARD-WRITE-AFTER-READ]`.
+
+- A Debug build turns on the layer.
+- The setting `Debug.IsSyncValidationOn` turns on the layer in each build, and also sync validation. Sync validation
+  finds hazards between GPU commands, such as a missing barrier. The setting takes effect at the next start.
+- The log line `GPU:` ends with `validating`, or with `validating with sync validation`.
+- `query gpu` gives `isValidating` and `isSyncValidating`.
+
+The layer comes with the Vulkan SDK. If the Vulkan loader does not find the layer, the gem does not validate. It logs
+a warning when the setting `Debug.IsSyncValidationOn` is on, because the setting then does nothing. Otherwise a Debug
+build logs an info line. If the SDK is in a folder that its installer did not register, set `VK_ADD_LAYER_PATH` to the `Bin`
+folder of the SDK.
+
+To run a sample with sync validation:
+
+```powershell
+$env:VK_ADD_LAYER_PATH = 'C:\VulkanSDK\<version>\Bin'
+tools/Scripts/Run.ps1 -Headless -Configure 'Debug.IsSyncValidationOn=true' -Commands 'wait loaded', 'exit'
+```
+
+A headless run ends at the first error, so it shows only the first error that the layer finds.
+
+## RenderDoc capture
+
+The console command `capture` writes the next frames of the GPU provider to a RenderDoc capture file, which you open
+in RenderDoc. It captures only when RenderDoc started Magic, on Windows. Magic never loads RenderDoc itself.
+
+1. Install [RenderDoc](https://renderdoc.org).
+2. Build Magic.
+3. Start Magic from RenderDoc. In the RenderDoc window, use **Launch Application**. Or, on the command line:
+
+   ```powershell
+   renderdoccmd capture Build/bin/Debug/Magic.exe open samples/MountainCabin/MountainCabin.magic
+   ```
+
+4. When the frame that you want to see shows, type `capture` into the terminal of Magic. To capture more than one
+   frame, type `capture --frames <n>`.
+5. Find the path of the capture file in the log, in the line `RenderDoc wrote the capture`. The file is in
+   `Captures/` beside Magic.
+6. Open the file in RenderDoc.
+
+A capture holds whole frames, from the start of the next frame. A headless run captures too. When RenderDoc did not
+start Magic, the log gets `RenderDoc is not attached`, and the command does nothing else.
+
 ## ImGuiDebugUI
 
 Draws the debug UI with [Dear ImGui](https://github.com/ocornut/imgui). Provides `IDebugUI`.

@@ -13,6 +13,8 @@ line. A typed option can omit the `--` at its start.
 
 - `open <path>` opens a project and `headless false` shows a window. Each of them restarts the run.
 - `exit` ends the run.
+- `capture [--frames <n>]` captures the next frame, or the next `n` frames, with RenderDoc into `Captures/` beside
+  Magic, when RenderDoc started Magic ([RenderDoc capture](DEBUGGING.md#renderdoc-capture)).
 
 ### Entities
 

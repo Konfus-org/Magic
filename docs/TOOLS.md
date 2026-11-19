@@ -100,7 +100,7 @@ into a stamped state, the script runs only the build.
 
 Runs a project for an agent, and names the window with the branch of the worktree. The window has that name from the
 moment it opens, because the script gives the name to Magic with `--name`. End `-Commands` with `exit` to end the run.
-The script does not build.
+The script does not build. `-Configure` gives settings to the run, as `Category.Member=value`.
 
 The window opens on the display after the main one, behind the window that has the focus, so that it does not interrupt
 the user. Use `-Display` to select a different display. `Screenshot.ps1` does the same with the name and the display.

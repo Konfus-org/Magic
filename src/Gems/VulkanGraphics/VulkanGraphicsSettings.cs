@@ -22,4 +22,12 @@ public sealed class VulkanGraphicsSettings : ISettings
     [Category("Rendering")]
     [RequireRestart]
     public string Gpu { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the validation layer looks for missing barriers and other hazards between GPU commands, in any build.
+    /// It needs the layer from the Vulkan SDK.
+    /// </summary>
+    [Category("Debug")]
+    [RequireRestart]
+    public bool IsSyncValidationOn { get; set; }
 }

@@ -381,6 +381,25 @@ The [rendering skill](rendering/SKILL.md) and its [fault list](rendering/FAULTS.
 - **The reference:** Blender Cycles, through the reference scene script.
 - **The test scene:** the Cabin domain of `samples/MountainCabin/MountainCabin.magic`.
 
+### Engine invariants
+
+Each row is true of Magic's renderer. A change to one is a sweeping change and needs the user's yes. The rules for
+shaders and the structs that they share with C# are in [Shader Standards](../SHADER_STANDARDS.md).
+
+| Invariant | Magic | Evidence |
+| --- | --- | --- |
+| Host | C#. Vulkan through Vortice.Vulkan. Slang through its C library, in process | [VulkanGraphics.csproj:15](../../src/Gems/VulkanGraphics/VulkanGraphics.csproj#L15), [Slang.cs:14](../../src/Gems/SlangShaderCompiler/Slang.cs#L14) |
+| Axes | Left-handed: +Y up, +X right, +Z forward. 1 unit is 1 m. Front faces are clockwise | [Transform.cs:6-10](../../src/Core/Ecs/Components/Transform.cs#L6), [VulkanResources.cs:596](../../src/Gems/VulkanGraphics/VulkanResources.cs#L596) |
+| Matrices | Row vectors (System.Numerics). Slang compiles row-major | [FrameView.cs:203](../../src/Gems/Rendering/DeferredRendering/View/FrameView.cs#L203), [ShaderCompiler.cs:650](../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L650) |
+| Depth | Reverse-Z with no far plane: 1 at the near plane, 0 at infinity. `D32_SFLOAT`, `GREATER_OR_EQUAL`, a clear to 0 | [FrameView.cs:203-218](../../src/Gems/Rendering/DeferredRendering/View/FrameView.cs#L203), [Renderer.cs:621](../../src/Gems/Rendering/DeferredRendering/Renderer.cs#L621), [VulkanResources.cs:599-603](../../src/Gems/VulkanGraphics/VulkanResources.cs#L599), [GpuCommands.cs:158](../../src/Core/Graphics/GpuCommands.cs#L158) |
+| API | Vulkan 1.3 or later, with `synchronization2` and dynamic rendering. No `VkRenderPass` | [VulkanDevice.cs:478](../../src/Gems/VulkanGraphics/VulkanDevice.cs#L478), [VulkanDevice.cs:523-528](../../src/Gems/VulkanGraphics/VulkanDevice.cs#L523), [VulkanRecorder.cs:310](../../src/Gems/VulkanGraphics/VulkanRecorder.cs#L310) |
+| Barriers | A pass declares what it reads and writes. The GPU provider puts in the barriers from these uses. Never write a barrier by hand | [ComputePass.cs:9](../../src/Core/Graphics/ComputePass.cs#L9), [GpuCommands.cs:111](../../src/Core/Graphics/GpuCommands.cs#L111) |
+| Bindings | One bindless heap in set 0, and a push constant of 16 bytes. A shader reads each resource through a heap reference | [Heap.slang:18-26](../../src/Resources/Shaders/Core/Heap.slang#L18), [Pass.slang:15](../../src/Resources/Shaders/Core/Pass.slang#L15), [GpuCommands.cs:191](../../src/Core/Graphics/GpuCommands.cs#L191) |
+| Shared structs | Scalar buffer layout, the same bytes as a C# struct with `Pack = 4`. Matrices row-major | [ShaderCompiler.cs:662](../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L662), [Heap.slang:6-7](../../src/Resources/Shaders/Core/Heap.slang#L6) |
+| Shaders | Profile `spirv_1_6`, entry point names kept, warnings as errors | [ShaderCompiler.cs:639-653](../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L639) |
+| Resources | A pass asks for each texture and buffer by name and description in each frame. The same description gives the same resource, so history carries over. A resource that no frame asks for is destroyed | [IGraphicsApi.cs:28-37](../../src/Core/Graphics/IGraphicsApi.cs#L28) |
+| Rays | Inline `RayQuery` alone: no ray tracing pipeline, no shader binding table. Rays are optional: check `GpuFeatures.HasRayQuery` before you build or trace | [HitSurface.slang:74](../../src/Gems/Rendering/DeferredRendering/Resources/Shaders/Trace/HitSurface.slang#L74), [VulkanDevice.cs:539-545](../../src/Gems/VulkanGraphics/VulkanDevice.cs#L539), [GlobalIllumination/Renderer.cs:128](../../src/Gems/Rendering/GlobalIllumination/Renderer.cs#L128) |
+
 ### Files
 
 | Role | Here |
