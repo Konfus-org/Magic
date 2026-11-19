@@ -8,11 +8,17 @@ import Core.Heap;
 import Core.Pack;
 import Core.Frame;
 import Scene.Instances;
+import Scene.Materials;
+import Scene.Models;
 import Scene.Culling;
 import Scene.Clusters;
 
 public static const uint ImpostorViews = 12u;
 public static const uint ImpostorTile = 64u;
+
+// Added to an atlas texel's material slot where its view saw a back face, C#'s ImpostorBuilder.BackFace. The texel
+// shows only for a double-sided material, as the clusters' back faces do.
+public static const uint ImpostorBackFace = 8u;
 
 // The handoff runs from the frame's impostorPixels, a pixel radius on screen, down to three quarters of it, and from
 // its impostorDistance, in metres to the instance's sphere, out to a quarter past it. Whichever is further along
@@ -274,12 +280,26 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
         if (texel.w < 0.5)
             continue;
 
+        uint mark = uint(texel.w + 0.5) - 1u;
+        uint slot = mark % ImpostorBackFace;
+        // A single-sided material does not show its back face: the nearest front face under it shows, from the
+        // atlas's lower half.
+        if (mark >= ImpostorBackFace && !IsDoubleSided(GetModels().materials, GetMaterial(instance, slot)))
+        {
+            atlasTexel.y += ImpostorViews * ImpostorTile;
+            texel = atlas.Load(atlasTexel, 0u);
+            if (texel.w < 0.5)
+                continue;
+
+            slot = uint(texel.w + 0.5) - 1u;
+        }
+
         coverage += blend.weights[i];
         normal += DecodeOctahedral(texel.xy) * blend.weights[i];
         if (blend.weights[i] > best)
         {
             best = blend.weights[i];
-            hit.slot = uint(texel.w + 0.5) - 1u;
+            hit.slot = slot;
             hit.texel = atlasTexel;
 
             // Where the pixel's own ray reaches the depth the view saw along its axis, so the point stays on the ray.

@@ -83,6 +83,32 @@
     ]
   },
   {
+    "name": "cabin-surfaces-close",
+    "project": "samples/MountainCabin/MountainCabin.magic",
+    "entity": "ReferenceView.CabinSurfacesClose",
+    "hours": [12, 22],
+    "points": [
+      {"name": "polished steel ball", "position": {"x": -3075.716, "y": 1150.25, "z": -218.962}},
+      {"name": "rough iron block", "position": {"x": -3075.463, "y": 1150.23, "z": -219.058}},
+      {"name": "dark lacquer ball", "position": {"x": -3075.461, "y": 1150.245, "z": -218.463}},
+      {"name": "water in the tray", "position": {"x": -3075.336, "y": 1150.156, "z": -218.809}},
+      {"name": "the glow bead", "position": {"x": -3075.184, "y": 1150.18, "z": -218.46}},
+      {"name": "the table top between them", "position": {"x": -3075.408, "y": 1150.13, "z": -218.632}}
+    ]
+  },
+  {
+    "name": "cabin-lantern",
+    "project": "samples/MountainCabin/MountainCabin.magic",
+    "entity": "ReferenceView.CabinLantern",
+    "hours": [12, 22],
+    "points": [
+      {"name": "the lantern's cap", "position": {"x": -3073.957, "y": 1150.68, "z": -215.566}},
+      {"name": "the lantern's base", "position": {"x": -3073.925, "y": 1150.44, "z": -215.59}},
+      {"name": "the bench top before the lantern", "position": {"x": -3073.749, "y": 1150.4, "z": -215.722}},
+      {"name": "floor beside the bench", "position": {"x": -3074.941, "y": 1149.85, "z": -215.767}}
+    ]
+  },
+  {
     "name": "leak-room",
     "project": "samples/MountainCabin/MountainCabin.magic",
     "entity": "ReferenceView.LeakRoom",

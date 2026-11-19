@@ -136,7 +136,7 @@ foreach ($each in $views) {
     $places[$each.name] = @(Get-Places $poses[$each.name] $settings.angleDegrees `
         -AtItsPoseAlone:(Test-LeakView $each))
 }
-$list = Join-Path ([IO.Path]::GetTempPath()) 'VisualTests-points.json'
+$list = Join-Path (Get-WorkRoot) 'VisualTests-points.json'
 Write-JsonList $list @($views | ForEach-Object { @{ view = $_.name; poses = $places[$_.name] } })
 Invoke-Blender $Blender 'Compare.py' @('--check-points', $list) 300 |
     Where-Object { $_ -match 'points at' } | Write-Output
@@ -157,7 +157,7 @@ for ($pass = 1; $pass -le $Repeat; $pass++) {
             $changed = if ($Tier -eq 'Full') {
                 Get-LightCommands (($at + $settings.lightChangeHours) % 24)
             } else { @() }
-            $work = Join-Path ([IO.Path]::GetTempPath()) "VisualTests-$($each.name)-$at-$pass"
+            $work = Join-Path (Get-WorkRoot) "VisualTests-$($each.name)-$at-$pass"
             New-Item -ItemType Directory -Force $work | Out-Null
             $capture = Get-RunCommands $each $pose $settings $Tier `
                 (Get-LightCommands $at) (Join-Path $work 'stats.json') $changed

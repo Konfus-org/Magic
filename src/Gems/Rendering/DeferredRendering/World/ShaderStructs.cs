@@ -200,19 +200,25 @@ internal struct GpuMaterial
     public const uint TranslucentBit = 0x80000000;
 
     /// <summary>
+    /// The bit of <see cref="Shader"/> set for a double-sided material's row, whose back faces draw and stop rays.
+    /// </summary>
+    public const uint DoubleSidedBit = 0x40000000;
+
+    /// <summary>
     /// Where the failure index starts in <see cref="Shader"/>, and its bits from there.
     /// </summary>
     public const int FailureShift = 12;
 
-    public const uint FailureMask = 0x7FFFF;
+    public const uint FailureMask = 0x3FFFF;
 
     /// <summary>
-    /// The shader word: the shader that draws the row, the row's failure index, and whether that shader is translucent.
+    /// The shader word: the shader that draws the row, the row's failure index, whether the material is double-sided,
+    /// and whether its shader is translucent.
     /// </summary>
     /// <remarks>
     /// Bits 0 to 11 hold the place in <see cref="GpuResources.MaterialShaders"/> of the shader that draws the row. Bits
-    /// 12 to 30 hold the row's index in the failure table, 0 where nothing failed. <see cref="TranslucentBit"/> is set
-    /// where that shader is translucent.
+    /// 12 to 29 hold the row's index in the failure table, 0 where nothing failed. <see cref="DoubleSidedBit"/> is set
+    /// where the material is double-sided, and <see cref="TranslucentBit"/> where its shader is translucent.
     /// </remarks>
     public uint Shader;
 

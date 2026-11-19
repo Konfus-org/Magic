@@ -22,7 +22,7 @@ public struct VisibleCluster
 
 // The counts buffer's word, as a byte offset, that holds the rows of the visible list the frame's instances asked
 // for, which the cluster budget reads next frame.
-public static const uint CountWantedRows = 36u;
+public static const uint CountWantedRows = 52u;
 
 // A visibility id: the visible list's row and the triangle in it. 0 is no surface.
 public uint EncodeVisibilityId(uint visibleIndex, uint triangle)

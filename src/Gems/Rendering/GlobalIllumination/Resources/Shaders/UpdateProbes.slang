@@ -24,13 +24,12 @@ import Scene.Models;
 // The rays the trace runs a group of.
 static const uint TraceGroupSize = 64u;
 
-// The rays all the probes trace in a frame, C#'s Probes.RayBudget: at least the most one probe traces.
-static const uint ProbeRayBudget = 131072u;
+// The rays all the probes trace in a frame, C#'s Probes.RayBudget: at least the most one probe traces. PROTO: as many
+// as the probes in view of a usual view ask for, so none of them waits a turn.
+static const uint ProbeRayBudget = 1048576u;
 
-// The most rays a probe traces in a frame, C#'s Probes.MaxProbeRays, and the step its count of rays moves in, also the
-// fewest it asks for.
+// The most rays a probe traces in a frame, C#'s Probes.MaxProbeRays.
 static const uint MaxProbeRays = 256u;
-static const uint ProbeRayStep = 4u;
 
 // How far a probe moves from a surface it is near, as a part of its depth's reach.
 static const float KeepDistance = 0.1;
@@ -155,42 +154,25 @@ ProbeVariance EstimateMean(ProbeVariance data, float3 value, float shortBlend)
     return data;
 }
 
-groupshared uint groupInconsistency;
-
-// A group a probe: as many rays as its light still changes, up to the most, half that for each cascade out, a tenth of
-// that out of view and all of them before it first blends its rays, kept as its count. A probe whose slot the moved grid
-// gave a new world cell starts afresh.
+// A group a probe: a count of rays fixed by where it is, so a still camera gives it the same rays each update. In view,
+// the most for the finest cascade and half that for each cascade out; out of view, an eighth of that, and none for the
+// last cascade, whose probes keep their light. All of them before a probe first blends its rays. A probe whose slot the
+// moved grid gave a new world cell starts afresh.
+// PROTO: the count was as many rays as the probe's light still changed. Each count gave another set of rays, so a
+// still scene changed a probe's rays from update to update, and its light swung.
 [shader("compute")]
-[numthreads(32, 1, 1)]
-void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
+[numthreads(1, 1, 1)]
+void AskProbeRays(uint3 group : SV_GroupID)
 {
     FrameConstants frame = GetFrame();
     ProbeGridConstants grid = GetProbeGrid();
     ProbeUpdateConstants update = GetGIConstants().probes;
     uint probe = group.x;
-    if (index == 0u)
-        groupInconsistency = 0u;
-
-    GroupMemoryBarrierWithGroupSync();
-    ArrayRef<uint4> variance = { update.variance };
-    float inconsistency = 0.0;
-    for (uint texel = index; texel < IrradianceTexelCount; texel += 32u)
-    {
-        inconsistency = max(inconsistency, DecodeProbeVariance(variance[probe * IrradianceTexelCount + texel]).inconsistency);
-    }
-
-    // A float of 0 or more orders as its bits do.
-    InterlockedMax(groupInconsistency, asuint(inconsistency));
-    GroupMemoryBarrierWithGroupSync();
-    if (index != 0u)
-        return;
-
     ArrayRef<GpuProbe> probes = { grid.probes };
     GpuProbe loaded = probes[probe];
     uint3 slot = GetProbeCoord(grid, probe);
     uint k = GetSlotCascade(grid, slot);
     ProbeGridConstants cascade = GetCascade(grid, k);
-    uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays)) >> k;
     int3 cell = GetProbeCell(grid, slot, GetFirstProbeCell(cascade, frame.cameraPosition.xyz));
     if (any(cell != GetProbeCell(grid, slot, GetFirstProbeCell(cascade, frame.previousCameraPosition.xyz))))
     {
@@ -199,10 +181,11 @@ void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
     }
 
     float3 position = ToCameraRelative(frame, GetProbePosition(cascade, cell, loaded));
-    if (!IsSphereInFrustum(frame, position, Max3(cascade.cellSize) * 2.0))
-        rayCount /= 10u;
+    bool isInView = IsSphereInFrustum(frame, position, Max3(cascade.cellSize) * 2.0);
+    uint rayCount = MaxProbeRays >> k;
+    if (!isInView)
+        rayCount = k + 1u < grid.cascades ? rayCount / 8u : 0u;
 
-    rayCount = clamp((rayCount + ProbeRayStep - 1u) / ProbeRayStep * ProbeRayStep, ProbeRayStep, MaxProbeRays);
     if (!HasBlended(loaded))
         rayCount = MaxProbeRays;
 
@@ -312,11 +295,16 @@ float3 GetFibonacciDirection(uint i, uint n)
     return float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 }
 
-// A rotation about a random axis by a random angle, the same for every ray of a frame, so the probes' rays point
-// elsewhere each frame (Rodrigues' formula).
-float3x3 GetRandomRotation(uint frameIndex)
+// The numbers a probe draws its rotation and its rays' light samples from: from its world cell and cascade, the same
+// every update, so a still scene gives a probe the same rays each update.
+uint2 GetProbeSeed(int3 cell, uint cascade)
 {
-    float3 xi = GetRandom(uint2(0u), frameIndex, 0u);
+    return uint2(asuint(cell.x) ^ (cascade << 24u), asuint(cell.y) * 65536u + asuint(cell.z));
+}
+
+// A rotation about a random axis by a random angle, from xi (Rodrigues' formula).
+float3x3 GetRotation(float3 xi)
+{
     float3 axis = SampleUniformSphere(xi.xy);
     float angle = TwoPi * xi.z;
     float s = sin(angle);
@@ -329,8 +317,9 @@ float3x3 GetRandomRotation(uint frameIndex)
     );
 }
 
-// A thread a ray of the list: traced from its probe, it brings back the sky where it hits nothing, and where it hits,
-// what the surface there reflects of the lights and of the probes' light, and gives off.
+// A thread a ray of the list: traced from its probe, it brings back the sky where it hits nothing, none where it hits a
+// back face, and where it hits a front face, what the surface there reflects of the lights and of the probes' light,
+// and gives off.
 [shader("compute")]
 [numthreads(TraceGroupSize, 1, 1)]
 void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
@@ -352,7 +341,10 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     int3 cell = GetProbeCell(grid, slot, GetFirstProbeCell(cascade, frame.cameraPosition.xyz));
     float3 origin = GetProbePosition(cascade, cell, LoadProbe(grid, probe));
     uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
-    float3 direction = normalize(mul(GetFibonacciDirection(rayIndex, rayCount), GetRandomRotation(frame.frameIndex)));
+    // PROTO: the rays turn by the probe's own rotation, not a new one each frame, and each ray samples the lights at the
+    // same points each update. A still scene then gives the same light each update, and only a real change moves it.
+    uint2 seed = GetProbeSeed(cell, GetSlotCascade(grid, slot));
+    float3 direction = normalize(mul(GetFibonacciDirection(rayIndex, rayCount), GetRotation(GetRandom(seed, 0u, 0u))));
 
     RaytracingAccelerationStructure world = GetTracedAcceleration();
     RayHit hit = GetClosestHit(world, origin, direction, 1e30, RAY_FLAG_NONE);
@@ -367,13 +359,18 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     {
         HitSurface surface = LoadHitSurface(hit, origin, direction);
 
-        // A ray that reached a back is cut short, so a probe sees the inside closer than it is and doesn't leak it.
+        // A ray that reached a back is inside a mesh, as a probe in a wall or between two logs is: it brings back no
+        // light, as a diffuse ray's does. Lit, it brought the light of the wall's other side into the room. It is cut
+        // short, so a probe sees the inside closer than it is and doesn't leak it.
         ray.depth = surface.isBackface ? hit.distance * 0.9 : hit.distance;
-        float3 xi = GetRandom(uint2(thread.x, 0u), frame.frameIndex, 1u);
-        float3 light = GetDirectLight<S>(lights, grid, world, surface, xi);
-        light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
-
-        ray.radiance = (light * surface.diffuse + surface.emissive) * hit.through;
+        ray.radiance = float3(0.0);
+        if (!surface.isBackface)
+        {
+            float3 xi = GetRandom(seed, rayIndex, 1u);
+            float3 light = GetDirectLight<S>(lights, grid, world, surface, xi);
+            light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
+            ray.radiance = (light * surface.diffuse + surface.emissive) * hit.through;
+        }
     }
 
     ArrayRef<uint4> rays = { update.rays };
@@ -470,7 +467,11 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
             data.inconsistency = 1.0;
         }
 
-        data = EstimateMean(data, sum, GetGIConstants().probeBlend);
+        // A texel that no ray reached keeps its light. Taken as none, it pulled the short mean down past ChangeRatio,
+        // and the mean jumped to black.
+        if (totalWeight > WeightEpsilon)
+            data = EstimateMean(data, sum, GetGIConstants().probeBlend);
+
         variance[texel] = EncodeProbeVariance(data);
         groupMeans[index] = data.mean;
     }

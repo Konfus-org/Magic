@@ -5,7 +5,7 @@ path; with -Domains, then opens each of them in turn and takes one of each.
 
 .DESCRIPTION
 Magic runs with --fail-on-error, with --name for -Name, and with these console lines piped in: wait loaded and wait drawn, which hold until the world has loaded and its
-first frame is drawn, however long its shaders take to compile, a wait for what fades in to settle, any -Commands, a short wait for them, then
+first frame is drawn, however long its shaders take to compile, a wait of -Settle frames for what fades in to settle, any -Commands, a short wait for them, then
 screenshot and a wait for it to be written; then, for each of -Domains, open, which holds until that domain has replaced
 the world, the same waits, and screenshot; then exit. The log is shown as it comes; the script's only output is the
 PNGs' paths, one a line in the order they were taken, then the window's captures with -Window, so a caller can keep
@@ -18,8 +18,10 @@ Build). Runs from any current directory.
 The build configuration whose Magic runs: Debug, Optimize or Release.
 
 .PARAMETER Settle
-How many seconds pass after a world has loaded before its screenshot, for what fades in, streams in or gathers light
-to settle.
+How many frames are drawn after a world has loaded before its screenshot, for what fades in, streams in or gathers
+light to settle. Frames, not seconds: a GPU that other runs share draws fewer frames in a second. The 120 frames are
+several times the longest history of a gem (14 to 18 frames) and of a light change (15 to 31). -Seconds is the time
+limit.
 
 .PARAMETER Seconds
 The longest the run may last for each world it loads, in seconds: a ceiling, not a wait. A run that has not loaded
@@ -37,7 +39,8 @@ Domains to open after the first screenshot, each by its asset path, a screenshot
 
 .PARAMETER Name
 The name the window shows in its title bar, so a person can tell whose run it is: the branch checked out where the
-script is, which is the agent session's name. Empty sends no name.
+script is, which is the agent session's name; on a detached HEAD, the worktree's folder name and the short commit.
+An empty name stops the run with an error.
 
 .PARAMETER Display
 The display that the window opens on, by its place in SDL's list of displays, where the main display is first. The
@@ -75,7 +78,7 @@ param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
     [ValidateRange(0, [int]::MaxValue)]
-    [int] $Settle = 20,
+    [int] $Settle = 120,
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Seconds = 600,
     [string] $Project = 'samples/MountainCabin/MountainCabin.magic',
@@ -105,25 +108,26 @@ if ($Window -and [System.Environment]::OSVersion.Platform -ne 'Win32NT') {
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 # Another branch's profiling turn must not be disturbed: wait for it to end.
 & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
-if (-not $PSBoundParameters.ContainsKey('Name')) { $Name = git -C $root branch --show-current }
+if (-not $PSBoundParameters.ContainsKey('Name')) { $Name = Get-RunName $root }
+Assert-RunName $Name
 $magic = Get-MagicPath $Configuration
 if (-not (Test-Path $magic)) {
     Write-Host "There is no $magic to run: build first (tools/Scripts/Validate.ps1 -Only Build)."
     exit 1
 }
-$projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
+$projectPath = Resolve-ProjectFile $Project $root
 
 # A screenshot is written by a worker, which takes seconds for a window-sized picture, so the run waits seconds after
 # each, not frames, before it goes on or quits.
-$lines = @('wait loaded', 'wait drawn', "wait ${Settle}s") + $Commands + @('wait 60', 'screenshot', 'wait 10s')
+$lines = @('wait loaded', 'wait drawn', "wait $Settle") + $Commands + @('wait 60', 'screenshot', 'wait 10s')
 foreach ($domain in $Domains) {
-    $lines += @("open $domain", "wait ${Settle}s", 'screenshot', 'wait 10s')
+    $lines += @("open $domain", "wait $Settle", 'screenshot', 'wait 10s')
 }
 $lines += 'exit'
 $arguments = @('open', "`"$projectPath`"")
 if (-not $AllowErrors) { $arguments += '--fail-on-error' }
 # The window shows whose run it is from the moment it opens.
-if ($Name) { $arguments += @('--name', "`"$Name`"") }
+$arguments += @('--name', "`"$Name`"")
 $Display = Limit-Display $Display
 # The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
 # SDL reads the hint from the environment, and Magic inherits it. The mode and the size reach the window only as it is

@@ -4,9 +4,9 @@ Runs Magic on a project for an agent: names its window for the session, sends it
 its time limit. Agents start Magic only through this script and the scripts that run Magic themselves.
 
 .DESCRIPTION
-Magic opens the project with --name, the worktree's branch, when it has a window, so the window shows whose run it
-is. Then it reads the console lines of -Commands. End -Commands with exit to end the run. Without exit, a run with a
-window goes on until the user closes it. A run still going after -Seconds is killed. With -Headless, the run has no
+Magic opens the project with --name, the worktree's branch (or its folder and short commit on a detached HEAD), when
+it has a window, so the window shows whose run it is. Then it reads the console lines of -Commands. End -Commands with
+exit to end the run. Without exit, a run with a window goes on until the user closes it. A run still going after -Seconds is killed. With -Headless, the run has no
 window and exits 2 at the first error logged. The log is shown as it comes, and the script's output is what Magic
 prints, such as a screenshot's path, also when the run was killed. The script exits with Magic's exit code, or 1 when it
 killed the run. It doesn't build. Runs from any current directory.
@@ -32,7 +32,8 @@ default, 1, is the display after the main one, so that the run does not cover th
 window opens on the main one.
 
 .PARAMETER Name
-The window's name: the worktree's branch, the session's name, when left out.
+The window's name: the worktree's branch, the session's name, when left out; on a detached HEAD, the worktree's folder
+name and the short commit. A window with no name stops the run with an error.
 
 .EXAMPLE
 tools/Scripts/Run.ps1 -Project samples/MountainCabin/MountainCabin.magic
@@ -64,13 +65,14 @@ $PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 # Another branch's profiling turn must not be disturbed: wait for it to end.
 & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
-if (-not $PSBoundParameters.ContainsKey('Name')) { $Name = git -C $root branch --show-current }
+if (-not $PSBoundParameters.ContainsKey('Name')) { $Name = Get-RunName $root }
+if (-not $Headless) { Assert-RunName $Name }
 $magic = Get-MagicPath $Configuration
 if (-not (Test-Path $magic)) {
     Write-Host "There is no $magic to run: build first (tools/Scripts/Validate.ps1 -Only Build)."
     exit 1
 }
-$projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
+$projectPath = Resolve-ProjectFile $Project $root
 
 $lines = $Commands
 $arguments = @('open', "`"$projectPath`"")
@@ -78,7 +80,7 @@ if ($Headless) {
     $arguments += @('--headless', 'true', '--fail-on-error')
 } else {
     # The window shows whose run it is from the moment it opens. A headless run has no window to name.
-    if ($Name) { $arguments += @('--name', "`"$Name`"") }
+    $arguments += @('--name', "`"$Name`"")
     $Display = Limit-Display $Display
     # The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
     # SDL reads the hint from the environment, and Magic inherits it.

@@ -125,6 +125,19 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
         model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, shown.bary.lambda);
         inputs = CreateSurfaceInputs(shown);
         lift = GetTriangleLift(shown, inputs.position);
+
+        // The back face of a double-sided material faces the camera: the triangle's own normal, turned to its vertex
+        // normals' side, points away from the camera there, and the surface's normal turns over with it. The lift
+        // goes to the vertex normals' side, now behind the face, where a ray starts on the face's other side: the
+        // back face starts its rays on the flat triangle.
+        float3 face = cross(shown.p1 - shown.p0, shown.p2 - shown.p0);
+        bool isBack = dot(face, inputs.position) * dot(face, inputs.normal) > 0.0;
+        if (isBack && IsDoubleSided(models.materials, GetMaterial(instance, slot)))
+        {
+            inputs.normal = -inputs.normal;
+            inputs.tangentSign = -inputs.tangentSign;
+            lift = 0.0;
+        }
     }
 
     uint row = GetMaterial(instance, slot);

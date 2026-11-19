@@ -26,6 +26,17 @@ $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 # The repository's root, from this script's folder.
 function Get-RepositoryRoot { return Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
 
+# A temp folder of this worktree alone, so that two worktrees that run the same script at the same time never write or
+# remove the same file. Its name holds a hash of the repository root's path.
+function Get-WorkRoot([string] $Root = (Get-RepositoryRoot)) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Root.TrimEnd([char[]] '\/').ToLowerInvariant())
+    $digest = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    $hash = [BitConverter]::ToString($digest).Replace('-', '').Substring(0, 12)
+    $path = Join-Path ([IO.Path]::GetTempPath()) "Magic-$hash"
+    New-Item -ItemType Directory -Force $path | Out-Null
+    return $path
+}
+
 # A number written the way every tool of this folder reads it, whatever the shell's language is.
 function Format-Number([double] $Value) { return [string]::Format($script:Invariant, '{0}', $Value) }
 

@@ -385,11 +385,13 @@ Each view is posed by an entity named `ReferenceView.<Name>` with the tag `rende
 | `cabin-window-glow` | Outside, at a window |
 | `cabin-room` | Inside, over the carpet, with the turning plate in the frame |
 | `cabin-surfaces` | Inside, at the table that carries the test surfaces |
+| `cabin-surfaces-close` | Inside, 0.85 m from the table's surfaces, at hours 12 and 22 |
+| `cabin-lantern` | Inside, 1 m from the lantern on the bench, at hours 12 and 22 |
 | `cabin-outside` | Outside, at the door |
 | `cabin-trees` | In a gap at the clearing's edge, 40 m from the cabin, towards the forest |
 | `leak-room` | In a sealed room 10 m behind the cabin. Each of its points states the light it may hold at most |
 
-The hours are 8, 12, 16 and 22. The turns are at 6, 20, 120 and 360 degrees a second. The slow two show a trail
+The hours are 8, 12, 16 and 22, or those that a view states. The turns are at 6, 20, 120 and 360 degrees a second. The slow two show a trail
 and a shadow that swims, and the fast two show what a mouse turn does. Each turn has the same limits, which are in
 the limits file.
 

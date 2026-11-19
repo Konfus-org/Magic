@@ -21,7 +21,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 4;
+    public int Version => 6;
 
     public ModelClusters Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
@@ -77,8 +77,8 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
 
         // Each atlas is copied up whole, so an impostor of another size would leave texels of it unwritten.
         if (
-            header.ImpostorHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 4
-            || header.ImpostorUvHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 2
+            header.ImpostorHalves != ImpostorBuilder.Size * ImpostorBuilder.Height * 4
+            || header.ImpostorUvHalves != ImpostorBuilder.Size * ImpostorBuilder.Height * 2
             || header.ImpostorViewBoundsCount != ImpostorBuilder.Views * ImpostorBuilder.Views
         )
             return Result.Failure("its impostor is not the size of an atlas.");

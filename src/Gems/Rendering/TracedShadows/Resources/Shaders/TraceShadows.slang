@@ -1,9 +1,9 @@
 // Each pixel's shadow mask as the rays leave it, which the denoiser then blends in place: a ray from its surface
-// towards the sun, and one towards each of the first lights its tile lists, each aimed at a random point of the light
-// so that a wider light casts a softer shadow. How much of the light gets through, 1 where nothing is in the way and 0
-// past something opaque. The sun's rays also go into its tiles, for the denoiser, one bit a pixel: lit at random as
-// often as the light gets through, and the colour its light takes on through glass into the sun's tint. A thread is a
-// traced pixel, which traces from the picture's pixel at its footprint's corner. The pass header's x is the frame's
+// towards the sun, and one towards each of the first lights its tile lists, a few each, aimed at random points of the
+// light so that a wider light casts a softer shadow. How much of the light gets through, 1 where nothing is in the way
+// and 0 past something opaque. The sun's rays also go into its tiles, for the denoiser, one bit a pixel: lit at random
+// as often as the light gets through, and the colour its light takes on through glass into the sun's tint. A thread is
+// a traced pixel, which traces from the picture's pixel at its footprint's corner. The pass header's x is the frame's
 // buffer, which holds the lights, and its y the denoiser's constants, with the traced targets.
 module "TraceShadows";
 
@@ -37,11 +37,15 @@ struct PixelShadows
 // passed, so the surface does not shadow itself and a thin caster close to it still does.
 static const float ShadowRayStart = 0.01;
 
+// How many rays a tile light gets a frame. One ray is lit or not, which the blend with last frame's smooths too
+// little in a wide light's soft shadow, so a still view flickers there.
+static const uint TileLightRays = 4u;
+
 // A point of the unit square for a pixel's slot and sample: blue noise, so neighbours' points differ as much as they
-// can, moved along R2 each frame, so the blend with last frame's averages more of the light than random points.
+// can, moved along R2 by each sample of each frame, so a pixel's samples in a frame and over frames spread evenly.
 float2 GetLightSample(ShadowDenoiseConstants denoise, uint2 pixel, uint frameIndex, uint slot, uint sample)
 {
-    return GetBlueNoise(denoise.blueNoise, pixel, frameIndex * 2u + sample, slot);
+    return GetBlueNoise(denoise.blueNoise, pixel, frameIndex * TileLightRays + sample, slot);
 }
 
 // Rays is how many the sun gets: 2 where last frame filtered the pixel's group, its shadow's edge, else 1.
@@ -100,13 +104,16 @@ PixelShadows Trace(FrameConstants frame, ShadowDenoiseConstants denoise, Lights 
             uint bit = firstbitlow(bits);
             bits &= bits - 1u;
             GpuLight light = LoadLight(lights.table, bucket * 32u + bit);
-            float3 target = SampleLightPoint(light, world, GetLightSample(denoise, pixel, frame.frameIndex, slot, 0u));
-            LightRay ray = CreateLightRay(origin, target);
-            if (dot(normal, ray.direction) > 0.0)
+            float through = 0.0;
+            for (uint i = 0u; i < TileLightRays; i++)
             {
-                float through = GetLuminance(GetTransmittance(scene, origin, ray.direction, ray.distance, frontReach));
-                shadows.words = EncodeShadow(shadows.words, slot, through);
+                float2 xi = GetLightSample(denoise, pixel, frame.frameIndex, slot, i);
+                LightRay ray = CreateLightRay(origin, SampleLightPoint(light, world, xi));
+                if (dot(normal, ray.direction) > 0.0)
+                    through += GetLuminance(GetTransmittance(scene, origin, ray.direction, ray.distance, frontReach));
             }
+
+            shadows.words = EncodeShadow(shadows.words, slot, through / float(TileLightRays));
 
             slot++;
         }

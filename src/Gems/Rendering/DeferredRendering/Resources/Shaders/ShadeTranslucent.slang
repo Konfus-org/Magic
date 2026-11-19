@@ -1,11 +1,11 @@
 // The nearest translucent surface of each pixel shaded over the lit picture: what is behind it, as shading left it and
 // seen through the air between them, through the pane's colour and through any other pane between, which a ray finds
 // on a GPU that traces rays, what it mirrors, more of it at a grazing angle (Schlick's Fresnel), which one ray traces on
-// such a GPU and which is the sky elsewhere, and the sun's highlight on it. Then the air in front of it, or in front of
-// the opaque surface where no pane is. Each pane's surface is what the resolve left in the frame's glass targets, as
-// its material decided it, and where it is the glass depth. The entry is specialised to the sky. The pass header's x
-// is the frame's buffer, which holds the lights, the probe grid's constants, whose probes are 0 where there are none,
-// and the air.
+// such a GPU and which is the sky elsewhere, the sun's highlight on it, and the light its body scatters. Then the air in
+// front of it, or in front of the opaque surface where no pane is. Each pane's surface is what the resolve left in the
+// frame's glass targets, as its material decided it, and where it is the glass depth. The entry is specialised to the
+// sky. The pass header's x is the frame's buffer, which holds the lights, the probe grid's constants, whose probes are
+// 0 where there are none, and the air.
 module "ShadeTranslucent";
 
 import Core.Heap;
@@ -14,6 +14,7 @@ import Core.Frame;
 import Core.Math;
 import Scene.Lights;
 import Light.Probes;
+import Light.LocalLights;
 import Light.Indirect;
 import Light.Air;
 import Surface.Brdf;
@@ -27,13 +28,49 @@ static const float PaneReflectance = 0.04;
 // How far a pane's mirror ray reaches, in metres.
 static const float MirrorRange = 10000.0;
 
-// The light a smooth pane mirrors from origin along a direction: the sky's where the ray lands on nothing, else what
-// the surface it lands on sends back, lit by the sun and the probes' light, as the reflections gem shades its hits but
-// without the local lights, which only the probes bring. Each passes any glass between.
-float3 GetMirrored<S : ISky>(Lights lights, float3 origin, float3 direction)
+// The light that reaches a surface from each local light whose reach holds it, shadowed by one ray at the light's
+// middle, over pi: what a white diffuse surface reflects of them. PROTO: each light in turn, as a pane's pixel has no
+// history to average a random pick over, and the cabin has few lights.
+float3 GetLocalLight(Lights lights, RaytracingAccelerationStructure scene, HitSurface surface)
+{
+    float3 origin = surface.position + surface.normal * 0.01;
+    float3 light = float3(0.0);
+    for (uint i = 0u; i < min(lights.count, MaxLights); i++)
+    {
+        GpuLight each = LoadLight(lights.table, i);
+        if (length(surface.position - each.position) > GetLightReach(each))
+            continue;
+
+        LightSample sample = SampleLight(each, surface.position, surface.normal);
+        float3 received = sample.irradiance * saturate(dot(surface.normal, sample.direction));
+        if (Max3(received) <= 0.0)
+            continue;
+
+        LightRay ray = CreateLightRay(origin, each.position);
+        light += received * GetTransmittance(scene, origin, ray.direction, ray.distance);
+    }
+
+    return light * InvPi;
+}
+
+// How far off the pane, in metres, its mirror ray starts: past the pane's own triangle, so the ray does not land on it
+// and dim the light by the pane's colour, and not past the inner side of a log that the pane's edge stands in.
+static const float PaneLift = 1e-3;
+
+// The light a smooth pane at a camera-relative point mirrors along a direction: the sky's where the ray lands on
+// nothing, else what the surface it lands on sends back, lit by the sun, the local lights and the probes' light. Each
+// passes any glass between. The ray starts on the pane, as a diffuse ray starts on its surface: lifted off it, at the
+// edge of a pane in a wall of logs it passed a log's inner side and brought in the light from outside the wall.
+float3 GetMirrored<S : ISky>(
+    FrameConstants frame, Lights lights, float3 world, float3 relative, float3 normal, float3 direction)
 {
     RaytracingAccelerationStructure scene = GetTracedAcceleration();
-    RayHit hit = GetClosestHit(scene, origin, direction, MirrorRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
+    float3 origin = world + normal * PaneLift;
+    RayHit hit = GetSurfaceHit(frame, scene, origin, relative, normal, direction, MirrorRange);
+    // A ray that lands on an inner side is inside a mesh: it mirrors black, not the light beyond the wall.
+    if (hit.isHit && !hit.isFrontFace)
+        return float3(0.0);
+
     if (!hit.isHit)
         return GetSkyRadiance<S>(lights, direction) * hit.through;
 
@@ -46,7 +83,8 @@ float3 GetMirrored<S : ISky>(Lights lights, float3 origin, float3 direction)
         : float3(0.0);
     ProbeGridConstants grid = GetProbeGrid();
     float3 surroundings = grid.probes != 0u ? GetProbeIrradiance(grid, landed.position, landed.normal) : float3(0.0);
-    return ((sun + surroundings) * landed.diffuse + landed.emissive) * hit.through;
+    float3 local = GetLocalLight(lights, scene, landed);
+    return ((sun + local + surroundings) * landed.diffuse + landed.emissive) * hit.through;
 }
 
 [shader("compute")]
@@ -99,22 +137,33 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     {
         RaytracingAccelerationStructure scene = GetTracedAcceleration();
         float offset = GetRayOffset(frame, position);
-        // The ray ends a ray offset short of the opaque surface, where the traced surface may stand nearer than the
-        // drawn one.
-        float behind = max(length(opaque - position) - offset - GetRayOffset(frame, opaque), 0.0);
-        through *= GetTransmittance(scene, world - view * offset, -view, behind);
+        // Only the panes between dim what is behind: the picture already holds the opaque surface that is drawn there.
+        float behind = max(length(opaque - position) - offset, 0.0);
+        through *= GetTranslucentTransmittance(scene, world - view * offset, -view, behind);
         float3 sunSide = dot(normal, toSun) > 0.0 ? normal : -normal;
         sunIlluminance *= GetTransmittance(scene, world + sunSide * offset, toSun, 1e6);
     }
 
     float3 mirror = reflect(-view, normal);
     float3 reflected = traced.acceleration != 0u
-        ? GetMirrored<S>(lights, world + normal * GetRayOffset(frame, position), mirror)
+        ? GetMirrored<S>(frame, lights, world, position, normal, mirror)
         : GetSkyRadiance<S>(lights, mirror);
-    // What does not get through the pane its body absorbs: clear glass scatters none of it.
-    Brdf body = CreateBrdf(float3(0.0), 0.0, surface.x, 0.5);
+    // What does not get through the pane, its alpha, its body scatters as a diffuse surface of its colour, lit on the
+    // viewer's side by the sun, the local lights and the probes' light.
+    Brdf body = CreateBrdf(base.rgb * base.a, 0.0, surface.x, 0.5);
+    float3 scattered = float3(0.0);
+    if (traced.acceleration != 0u)
+    {
+        HitSurface paneSurface = { world, normal, base.rgb, float3(0.0), false };
+        scattered += GetLocalLight(lights, GetTracedAcceleration(), paneSurface);
+    }
+
+    ProbeGridConstants grid = GetProbeGrid();
+    if (grid.probes != 0u)
+        scattered += GetProbeIrradiance(grid, world, normal);
     float3 pane = fresnel * reflected
         + Evaluate(body, normal, view, toSun) * sunIlluminance
+        + scattered * body.diffuse
         + surface.yzw;
     // What is behind reaches the pane through the air between them, and the camera through the air in front of the
     // pane, whose own light, ApplyAir of nothing at the pane, the pane does not dim.

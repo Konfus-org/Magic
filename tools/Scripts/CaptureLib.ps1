@@ -123,7 +123,7 @@ function Get-RunCommands([object] $ViewJson, [hashtable] $Pose, [object] $Settin
         [string[]] $Lights, [string] $Stats, [string[]] $ChangedLights) {
     $scene = $Settings.scene
     $frames = $Settings.frames
-    $waits = $Settings.waitSeconds
+    $waits = $Settings.waitFrames
     $commands = [Collections.Generic.List[string]]::new()
     $labels = [Collections.Generic.List[string]]::new()
     $moves = [Collections.Generic.List[object]]::new()
@@ -145,7 +145,7 @@ function Get-RunCommands([object] $ViewJson, [hashtable] $Pose, [object] $Settin
     function Add-Move([string] $Label, [string] $Start, [string] $Move, [double] $Seconds, [string] $Back,
             [string] $Revealed) {
         $commands.Add($Start)
-        $commands.Add("wait $($waits.beforeMove)s")
+        $commands.Add("wait $($waits.beforeMove)")
         $commands.Add($Move)
         $commands.Add("wait $(Format-Number $Seconds)s")
         Get-MovingSceneCommands $scene | ForEach-Object { $commands.Add($_) }
@@ -170,7 +170,7 @@ function Get-RunCommands([object] $ViewJson, [hashtable] $Pose, [object] $Settin
     $commands.Add("set player.camera.fov $(Format-Number $fieldOfView)")
     $Lights | ForEach-Object { $commands.Add($_) }
     Get-HeldSceneCommands $scene | ForEach-Object { $commands.Add($_) }
-    $commands.Add("wait $($waits.settle)s")
+    $commands.Add("wait $($waits.settle)")
     $commands.Add("query stats gpu --out `"$Stats`"")
 
     Add-Frames $frames.still 'still'
@@ -179,7 +179,7 @@ function Get-RunCommands([object] $ViewJson, [hashtable] $Pose, [object] $Settin
     $places = @(Get-Places $Pose $Settings.angleDegrees -AtItsPoseAlone:(Test-LeakView $ViewJson))
     foreach ($place in @($places | Where-Object { $_.ContainsKey('side') })) {
         $commands.Add((Get-RotationCommand @($place.pose[3..6])))
-        $commands.Add("wait $($waits.angle)s")
+        $commands.Add("wait $($waits.angle)")
         Add-Frames $frames.angle $place.side
     }
 
@@ -187,7 +187,7 @@ function Get-RunCommands([object] $ViewJson, [hashtable] $Pose, [object] $Settin
         # The camera goes back to the view before the moves, which each start away from it.
         if ($places.Count -gt 1) {
             $commands.Add((Get-RotationCommand $Pose.rotation))
-            $commands.Add("wait $($waits.angle)s")
+            $commands.Add("wait $($waits.angle)")
         }
         # Every turn goes in the direction that Get-Turned's positive degrees give, so the right edge of the picture
         # is the one that each of them brings into view.
@@ -211,7 +211,7 @@ function Get-RunCommands([object] $ViewJson, [hashtable] $Pose, [object] $Settin
         if ($ChangedLights) {
             $ChangedLights | ForEach-Object { $commands.Add($_) }
             Add-Frames $frames.light 'light'
-            $commands.Add("wait $($waits.light)s")
+            $commands.Add("wait $($waits.light)")
             Add-Frames $frames.still 'lightstill'
             $moves.Add(@{ label = 'light change'; revealed = $null; moving = $null; held = 'light'
                 still = 'lightstill' })

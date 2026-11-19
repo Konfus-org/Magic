@@ -448,7 +448,7 @@ internal sealed class GpuResources(
     {
         GpuState state = Pack(slot, out row, out MaterialLayout layout, out failure);
         if (!layout.Fields.IsDefault)
-            row.Shader = GetMaterialShader(layout.Shader) | (layout.IsTranslucent ? GpuMaterial.TranslucentBit : 0);
+            row.Shader |= GetMaterialShader(layout.Shader) | (layout.IsTranslucent ? GpuMaterial.TranslucentBit : 0);
 
         return state;
     }
@@ -642,6 +642,7 @@ internal sealed class GpuResources(
         }
 
         Material material = loaded.Value;
+        row.Shader = material.IsDoubleSided ? GpuMaterial.DoubleSidedBit : 0;
         if (_layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
             return GpuState.Loading;
 

@@ -319,7 +319,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             return null;
 
         _probes.Record(view, grid, gi.Probes);
-        _diffuse.RecordTrace(view, grid, gi);
+        _diffuse.RecordTrace(view, grid, gi, nrd.Value.Output);
         Result denoised = _denoisers[frame.View]
             .Record(view, nrd.Value, frame.Index, (float)frame.AppDeltaSec, !hasHistory);
         if (!denoised.Ok)

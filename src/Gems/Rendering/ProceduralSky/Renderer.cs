@@ -135,6 +135,7 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
         // Each table filled over its texels, from the ones before it. The multi-scattering table takes a group for
         // each texel, whose threads share its directions.
         GpuConstants header = new(gpu.Frame.Id);
+        GpuConstants viewHeader = SkyCalibration.GetViewHeader(gpu.Frame.Id);
         graph
             .Compute("Sky: transmittance", _transmittanceShader, header, RenderStage.Prepare)
             .Reads(gpu.Frame)
@@ -146,7 +147,7 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
             .Writes(multiScattering.Value)
             .Dispatch((uint)_multiScatteringTable.Width, (uint)_multiScatteringTable.Height);
         graph
-            .Compute("Sky: view", _viewShader, header, RenderStage.Prepare)
+            .Compute("Sky: view", _viewShader, viewHeader, RenderStage.Prepare)
             .Reads(gpu.Frame, transmittance.Value, multiScattering.Value)
             .Writes(view.Value)
             .DispatchOver(_viewTable.Width, _viewTable.Height);

@@ -33,6 +33,11 @@ internal record struct ReflectionConstants
     public float ReflectionRayRange;
 
     public float ReflectionHistory;
+
+    /// <summary>
+    /// Last frame's lit picture, which the screen trace reads, or none.
+    /// </summary>
+    public GpuTexture Picture;
 }
 
 /// <summary>
@@ -48,6 +53,16 @@ internal record struct TracedReflectionConstants
     public GpuTexture Resolved;
 
     public GpuTexture Distance;
+
+    /// <summary>
+    /// The buffer of what each traced pixel's ray landed on, <c>ReflectionHit</c> a traced pixel.
+    /// </summary>
+    public GpuBuffer Hits;
+
+    /// <summary>
+    /// The light of each traced pixel's ray from the screen, times how much it counts, which the hits' light adds to.
+    /// </summary>
+    public GpuTexture Screen;
 
     public TracedBlendConstants Blend;
 }

@@ -155,7 +155,9 @@ names are in `DebugView`. With a gem that gives the debug UI, F2 opens the Rende
 the views.
 
 To measure the light against a path tracer, use the reference views ([Debugging](DEBUGGING.md#reference-views)).
-`screenshot --hdr` saves the frame's lit light before the exposure, in nits, as a PFM.
+`screenshot --hdr` saves the frame's lit light before the exposure, in nits, as a PFM. The camera does not jitter
+in that frame, so the light is at the middle of each pixel and has no anti-aliasing. In a debug view it still saves
+the lit light, not the view.
 
 ### Change the renderer
 

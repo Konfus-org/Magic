@@ -9,6 +9,7 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Scene.Instances;
+import Scene.Materials;
 import Scene.Models;
 import Scene.Vertices;
 
@@ -92,6 +93,32 @@ public float3 GetTransmittance(
     return query.CommittedStatus() == COMMITTED_NOTHING ? through : float3(0.0);
 }
 
+// How much of the light along a ray from origin up to a distance gets through the translucent surfaces in its way, by
+// colour. A surface that lets nothing through does not count: the ray ends at a drawn surface, and the drawn cut of
+// a model's clusters may stand behind the full detail that the ray lands on.
+public float3 GetTranslucentTransmittance(
+    RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
+{
+    Models models = GetModels();
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.0;
+    ray.TMax = distance;
+    query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
+    float3 through = float3(1.0);
+    while (query.Proceed())
+    {
+        uint mesh = query.CandidateInstanceContributionToHitGroupIndex() + query.CandidateGeometryIndex();
+        float3 transmission = GetTransmission(models, query.CandidateInstanceID(), mesh);
+        if (Max3(transmission) > 0.0)
+            through *= transmission;
+    }
+
+    return through;
+}
+
 // The same, and in occluder how far along the ray the nearest surface that lets nothing through is, 0 where the light
 // gets through: the query goes on past the first such surface to find the nearest, which a shadow's width follows.
 public float3 GetTransmittance(
@@ -153,6 +180,8 @@ public struct RayHit
     public uint triangle;
     public float2 barycentrics;
     public bool isFrontFace;
+    // Whether the ray landed on a double-sided material, which has no inner side.
+    public bool isDoubleSided;
     public float distance;
     public float3 through;
 }
@@ -197,8 +226,14 @@ public RayHit GetClosestHit(
     hit.mesh = query.CommittedInstanceContributionToHitGroupIndex() + query.CommittedGeometryIndex();
     hit.triangle = query.CommittedPrimitiveIndex();
     hit.barycentrics = query.CommittedTriangleBarycentrics();
-    hit.isFrontFace = query.CommittedTriangleFrontFace();
     hit.distance = query.CommittedRayT();
+
+    // The back face of a double-sided material is a surface as its front face is, so a ray that lands on it is not
+    // blocked.
+    GpuInstance instance = LoadInstance(models.instances, hit.instance);
+    uint material = GetMaterial(instance, LoadMesh(models.meshes, hit.mesh).materialSlot);
+    hit.isDoubleSided = hit.isHit && IsDoubleSided(models.materials, material);
+    hit.isFrontFace = query.CommittedTriangleFrontFace() || hit.isDoubleSided;
 
     // Short of the surface it landed on, so the second trace does not stop at it.
     float reach = hit.isHit ? hit.distance * 0.999 : distance;
@@ -228,4 +263,51 @@ public HitSurface LoadHitSurface(RayHit hit, float3 origin, float3 direction)
     surface.emissive = material.emissive;
     surface.isBackface = !hit.isFrontFace;
     return surface;
+}
+
+// How many inner sides of its own surface a ray from a pixel passes at most.
+static const uint OwnSidesPassed = 2u;
+
+// How near the outward normal of an inner side must be to the pixel's normal for the side to be the pixel's own surface.
+static const float OwnSideFacing = 0.5;
+
+// What a ray from a pixel's surface lands on first within a distance. The ray starts on the surface, not off it. It
+// passes an inner side as near as the offset of a ray from that pixel along the ray, and facing the same way as the
+// pixel: that is its own surface, where the drawn cut of the clusters stands under the full detail. Any other inner side
+// stops it. At a seam between two logs, the pixel can lie inside the log above, and a ray that passed that log's inner
+// side, or started off the surface past it, brought in the light from outside the wall.
+public RayHit GetSurfaceHit(
+    FrameConstants frame,
+    RaytracingAccelerationStructure scene,
+    float3 world,
+    float3 relative,
+    float3 normal,
+    float3 direction,
+    float distance
+)
+{
+    float reach = GetRayOffset(frame, relative) / max(dot(direction, normal), 0.2);
+    float start = 0.0;
+    float3 through = float3(1.0);
+    RayHit hit;
+    for (uint i = 0u; i <= OwnSidesPassed; i++)
+    {
+        hit = GetClosestHit(scene, world + direction * start, direction, distance - start, RAY_FLAG_NONE);
+        hit.distance += start;
+        through *= hit.through;
+        // A double-sided surface has no inner side, so either side of it within the offset can be the pixel's own
+        // triangle: the facing test alone decides.
+        if (!hit.isHit || (hit.isFrontFace && !hit.isDoubleSided) || hit.distance > reach || i == OwnSidesPassed)
+            break;
+
+        // The hit's normal faces the ray, so the side's outward normal is the opposite one.
+        float3 outward = -LoadHitSurface(hit, world, direction).normal;
+        if (dot(outward, normal) < OwnSideFacing)
+            break;
+
+        start = hit.distance + 1e-4;
+    }
+
+    hit.through = through;
+    return hit;
 }

@@ -29,9 +29,9 @@ static const uint RetestGroups = 0u;
 
 // The counts buffer's words the cull alone reads, as byte offsets: the retest list's length, the visible list's, and
 // the first distance bin with no room left: instances in it and past it draw as their impostors.
-static const uint CountRetest = 28u;
-static const uint CountVisibleList = 32u;
-static const uint CountFitBins = 40u;
+static const uint CountRetest = 44u;
+static const uint CountVisibleList = 48u;
+static const uint CountFitBins = 56u;
 
 // The counts buffer's distance bins from DemandBinsOffset, a word each: the rows asked for by the instances whose
 // nearest point is that far from the camera, four bins to each doubling of the distance in metres.
@@ -52,7 +52,8 @@ struct DrawArguments
 // The draw arguments' regions, C#'s DrawRegion, each as many draws as the visible list has rows and counted at word
 // region * 4 of the counts buffer: the clusters the old depth pyramid shows, then those the retest finds the new one
 // shows, then the same two of the clusters in the impostor handoff, which draw with the dither, then the translucent
-// clusters from both, and the impostors of both.
+// clusters from both, and the impostors of both. Last, the first four again for the clusters of a double-sided
+// material, which draw both faces, in the same order.
 enum DrawRegion
 {
     Visible,
@@ -62,6 +63,10 @@ enum DrawRegion
     Glass,
     Impostors,
     RetestedImpostors,
+    VisibleDoubleSided,
+    RetestedDoubleSided,
+    FadingDoubleSided,
+    RetestedFadingDoubleSided,
 }
 
 // What a cluster's tests say: not drawn, drawn, or hidden only by last frame's depth pyramid, to retest.
@@ -266,7 +271,8 @@ ClusterOutcome GetClusterOutcome(FrameConstants frame, GpuInstance instance, uin
 {
     ClusterConstants clusters = GetClusters();
     GpuCluster cluster = LoadCluster(clusters.clusters, clusterIndex);
-    if (GetMaterial(instance, cluster.materialSlot) == EmptySlot)
+    uint material = GetMaterial(instance, cluster.materialSlot);
+    if (material == EmptySlot)
         return ClusterOutcome.Culled;
 
     float scale = GetMaxScale(instance.world);
@@ -284,9 +290,10 @@ ClusterOutcome GetClusterOutcome(FrameConstants frame, GpuInstance instance, uin
     if (!(parentError > clusters.errorThreshold && error <= clusters.errorThreshold))
         return ClusterOutcome.Culled;
 
-    // The cone: culled when the camera is behind every triangle's plane, the sphere widening the cone to be sure.
+    // The cone: culled when the camera is behind every triangle's plane, the sphere widening the cone to be sure. A
+    // double-sided material's back faces draw too.
     float cutoff = GetConeCutoff(cluster);
-    if (cutoff < 1.0)
+    if (cutoff < 1.0 && !IsDoubleSided(GetModels().materials, material))
     {
         float3 axis = ToWorldDirection(instance.world, GetConeAxis(cluster));
         float distance = length(center);
@@ -319,13 +326,18 @@ bool TryAddRetest(uint index, uint cluster)
 }
 
 // Appends the draw of the cluster at row to region, its pass's region of the draws with or without the handoff's
-// dither. A translucent cluster goes to the glass's, from either pass.
+// dither. A translucent cluster goes to the glass's, from either pass, and a double-sided one to the twin of region.
 void AddClusterDraw(GpuInstance instance, uint clusterIndex, uint row, DrawRegion region)
 {
     GpuCluster cluster = LoadCluster(GetClusters().clusters, clusterIndex);
-    bool isGlass = IsTranslucent(GetModels().materials, GetMaterial(instance, cluster.materialSlot));
+    uint material = GetMaterial(instance, cluster.materialSlot);
     DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, row };
-    AddDraw(isGlass ? DrawRegion.Glass : region, arguments);
+    if (IsTranslucent(GetModels().materials, material))
+        AddDraw(DrawRegion.Glass, arguments);
+    else if (IsDoubleSided(GetModels().materials, material))
+        AddDraw(DrawRegion(uint(region) + uint(DrawRegion.VisibleDoubleSided)), arguments);
+    else
+        AddDraw(region, arguments);
 }
 
 // Appends the instance's impostor to region, the impostors of its pass, with firstInstance its draw's first instance,

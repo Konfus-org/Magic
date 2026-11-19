@@ -143,6 +143,9 @@ tools/Scripts/VisualTests.ps1 -View cabin-outside -Hour 12 -Tier Quick
 `-Tier Quick` takes the still frames and the two camera angles beside the view. `-Tier Full`, the default, takes the
 turns, the strafe and the light change as well, and so it judges the settle rows and the noise of a move too.
 
+The run waits for the picture to settle in frames, not in seconds (`waitFrames` in `VisualTests.json`: 120 for the
+settle), so a GPU that other runs share gives the same picture. The time limit of the run is `-Seconds`.
+
 `-UpdateBaseline` writes the baseline again from this run. `-Repeat <n>` runs each view and hour n times and prints
 the spread of each row. What a verdict beside PASS or FAIL means, and what the command's exit code says, are in
 [Reference views](DEBUGGING.md#reference-views).

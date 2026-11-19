@@ -36,8 +36,9 @@ static const float3 Green = float3(0.125, 0.319, 0.016);
 static const float2 CloudBand = float2(0.05, 0.35);
 
 // The texts, as character codes: "Sky failed" and "Weather failed".
-// PROTO: how much of the light a shadowed surface would get from each light unshadowed it still reflects, from every
-// side, in place of that light's bounce off the surroundings where the indirect light gives less.
+// PROTO: how much of the sun's light a shadowed surface would get unshadowed it still reflects, from every side, in
+// place of the sun's bounce off the surroundings where the indirect light gives less. A local light gets no fill: its
+// unshadowed light reaches through a wall.
 static const float ShadowFill = 0.05;
 
 // PROTO: the shares of the sky a surface sees between which the sun's fill rises from none to all of it: under the
@@ -84,10 +85,10 @@ float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 // room reflects none of the sky. The nearby surfaces in the depth hide part of both where surfaces meet, the specular
 // as much as that occlusion hides of its lobe (Lagarde and de Rousiers, "Moving Frostbite to Physically Based
 // Rendering", 2014). The specular rises towards edge-on only where the surface is smooth enough to trace, less as it
-// roughens to that limit. The diffuse is never darker than the fills, what a white diffuse surface reflects of the
-// stand-in bounce of the sun and of the local lights, so a shadow is never black: it gets the part of the fills its own
-// brightness lacks, so light that is bright enough keeps its colour. Where the diffuse is traced, the sun fills only
-// where the surface sees enough of the sky, so it fills no room.
+// roughens to that limit. The diffuse is never darker than the fill, what a white diffuse surface reflects of the
+// stand-in bounce of the sun, so a shadow in the open is never black: it gets the part of the fill its own brightness
+// lacks, so light that is bright enough keeps its colour. Where the diffuse is traced, the sun fills only where the
+// surface sees enough of the sky, so it fills no room.
 float3 ShadeIndirectLight<S : ISky>(
     FrameConstants frame,
     Lights lights,
@@ -97,8 +98,7 @@ float3 ShadeIndirectLight<S : ISky>(
     float3 relative,
     float3 normal,
     float3 view,
-    float3 sunFill,
-    float3 localFill
+    float3 sunFill
 )
 {
     IndirectLight indirect = GetIndirectLight();
@@ -130,7 +130,7 @@ float3 ShadeIndirectLight<S : ISky>(
         specular = lerp(specular, traced.rgb, traced.a * smooth);
     }
 
-    float3 fill = (indirect.termsOff & 4u) == 0u ? sunFill + localFill : float3(0.0);
+    float3 fill = (indirect.termsOff & 4u) == 0u ? sunFill : float3(0.0);
     diffuse += fill * saturate(1.0 - GetLuminance(diffuse) / max(GetLuminance(fill), Epsilon));
     float occlusion = GetIndirectOcclusion(frame, pixel, relative, normal);
     float facing = max(dot(normal, view), 1e-4);
@@ -200,7 +200,6 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     uint offset = GetLightTileOffset(thread.xy / LightTileSize, size.x);
     uint buckets = (min(lights.count, MaxLights) + 31u) / 32u;
     uint slot = 1u;
-    float3 localUnshadowed = float3(0.0);
     for (uint bucket = 0u; bucket < buckets; bucket++)
     {
         uint bits = tiles[offset + bucket];
@@ -210,13 +209,11 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
             bits &= bits - 1u;
             LightSample sample = SampleLight(LoadLight(lights.table, bucket * 32u + bit), world, normal);
             color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance * GetShadow(shadowWords, slot);
-            localUnshadowed += sample.irradiance;
             slot++;
         }
     }
 
-    float fill = ShadowFill * InvPi;
     color += hdr.Load(thread.xy).rgb + surface.z * ShadeIndirectLight<S>(
-        frame, lights, brdf, surface.x, thread.xy, relative, normal, view, sunUnshadowed * fill, localUnshadowed * fill);
+        frame, lights, brdf, surface.x, thread.xy, relative, normal, view, sunUnshadowed * ShadowFill * InvPi);
     hdr.Store(thread.xy, float4(color, 1.0));
 }

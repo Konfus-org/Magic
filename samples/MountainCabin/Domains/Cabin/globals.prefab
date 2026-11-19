@@ -10,6 +10,8 @@
         {"name": "ReferenceView.CabinOutside", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3067.484, "y": 1151.02, "z": -220.285}, "rotation": {"x": 0.000000, "y": -0.537300, "z": 0.000000, "w": 0.843391}}}},
         {"name": "ReferenceView.CabinTrees", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3046.100, "y": 1150.333, "z": -210.200}, "rotation": {"x": -0.018756, "y": -0.932301, "z": -0.048860, "w": 0.357877}}}},
         {"name": "ReferenceView.CabinSurfaces", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3074.876, "y": 1150.650, "z": -217.445}, "rotation": {"x": 0.032443, "y": -0.965266, "z": 0.146340, "w": 0.213994}}}},
+        {"name": "ReferenceView.CabinSurfacesClose", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3075.130, "y": 1150.550, "z": -217.989}, "rotation": {"x": 0.046846, "y": -0.953161, "z": 0.211310, "w": 0.211310}}}},
+        {"name": "ReferenceView.CabinLantern", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3073.212, "y": 1150.650, "z": -216.124}, "rotation": {"x": 0.023406, "y": -0.447606, "z": 0.011721, "w": 0.893843}}}},
         {"name": "ReferenceView.LeakRoom", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3069.870, "y": 1150.540, "z": -208.990}, "rotation": {"x": -0.173648, "y": 0.000000, "z": 0.000000, "w": 0.984808}}}},
         // The look: the sky gives 1.6 times the light of the air itself, which lifts the shadows and the room, and
         // the sun and the moon keep their own light.

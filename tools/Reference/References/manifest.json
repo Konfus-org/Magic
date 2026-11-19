@@ -1,6 +1,38 @@
 {
+    "cabin-lantern-12":  {
+                             "hash":  "C697E004D338B1D5",
+                             "pose":  {
+                                          "position":  [
+                                                           -3073.212,
+                                                           1150.65,
+                                                           -216.124
+                                                       ],
+                                          "rotation":  [
+                                                           0.023406,
+                                                           -0.447606,
+                                                           0.011721,
+                                                           0.893843
+                                                       ]
+                                      }
+                         },
+    "cabin-lantern-22":  {
+                             "hash":  "DCCBF353C1DB16F1",
+                             "pose":  {
+                                          "position":  [
+                                                           -3073.212,
+                                                           1150.65,
+                                                           -216.124
+                                                       ],
+                                          "rotation":  [
+                                                           0.023406,
+                                                           -0.447606,
+                                                           0.011721,
+                                                           0.893843
+                                                       ]
+                                      }
+                         },
     "cabin-outside-12":  {
-                             "hash":  "CC74E6C30AE31062",
+                             "hash":  "34B56FF77FB19A73",
                              "pose":  {
                                           "position":  [
                                                            -3067.484,
@@ -16,7 +48,7 @@
                                       }
                          },
     "cabin-outside-16":  {
-                             "hash":  "BE342536AEF35EB8",
+                             "hash":  "DA4F30CF7B0794CC",
                              "pose":  {
                                           "position":  [
                                                            -3067.484,
@@ -32,7 +64,7 @@
                                       }
                          },
     "cabin-outside-22":  {
-                             "hash":  "6DD3395047C80CD4",
+                             "hash":  "4B2F3B3359440EDF",
                              "pose":  {
                                           "position":  [
                                                            -3067.484,
@@ -48,7 +80,7 @@
                                       }
                          },
     "cabin-outside-8":  {
-                            "hash":  "00502E87442DAFFD",
+                            "hash":  "191BE43C951D953A",
                             "pose":  {
                                          "position":  [
                                                           -3067.484,
@@ -64,7 +96,7 @@
                                      }
                         },
     "cabin-room-12":  {
-                          "hash":  "F6319ECBA9052DFA",
+                          "hash":  "3CDA5852291283FA",
                           "pose":  {
                                        "position":  [
                                                         -3076.191,
@@ -80,7 +112,7 @@
                                    }
                       },
     "cabin-room-16":  {
-                          "hash":  "A7C3E340F2177869",
+                          "hash":  "87C0B19E1499A3C0",
                           "pose":  {
                                        "position":  [
                                                         -3076.191,
@@ -96,7 +128,7 @@
                                    }
                       },
     "cabin-room-22":  {
-                          "hash":  "22D929A1B5572228",
+                          "hash":  "40B3C2789FF4F6BA",
                           "pose":  {
                                        "position":  [
                                                         -3076.191,
@@ -112,7 +144,7 @@
                                    }
                       },
     "cabin-room-8":  {
-                         "hash":  "CD98AF288DBC617D",
+                         "hash":  "59C27C2E01AAEB7D",
                          "pose":  {
                                       "position":  [
                                                        -3076.191,
@@ -128,7 +160,7 @@
                                   }
                      },
     "cabin-surfaces-12":  {
-                              "hash":  "02D30BE9ECA71390",
+                              "hash":  "D602FA453E0D0A22",
                               "pose":  {
                                            "position":  [
                                                             -3074.876,
@@ -144,7 +176,7 @@
                                        }
                           },
     "cabin-surfaces-16":  {
-                              "hash":  "25B8C03155621B7A",
+                              "hash":  "877EEECF454BC1C4",
                               "pose":  {
                                            "position":  [
                                                             -3074.876,
@@ -160,7 +192,7 @@
                                        }
                           },
     "cabin-surfaces-22":  {
-                              "hash":  "F8E5AECEBE4A36EA",
+                              "hash":  "FDDB5943EF8CDEB1",
                               "pose":  {
                                            "position":  [
                                                             -3074.876,
@@ -176,7 +208,7 @@
                                        }
                           },
     "cabin-surfaces-8":  {
-                             "hash":  "22922E858C583D0F",
+                             "hash":  "E8D908CD0910BD60",
                              "pose":  {
                                           "position":  [
                                                            -3074.876,
@@ -191,8 +223,40 @@
                                                        ]
                                       }
                          },
+    "cabin-surfaces-close-12":  {
+                                    "hash":  "F0EB3CBAD8CC56DD",
+                                    "pose":  {
+                                                 "position":  [
+                                                                  -3075.13,
+                                                                  1150.55,
+                                                                  -217.989
+                                                              ],
+                                                 "rotation":  [
+                                                                  0.046846,
+                                                                  -0.953161,
+                                                                  0.21131,
+                                                                  0.21131
+                                                              ]
+                                             }
+                                },
+    "cabin-surfaces-close-22":  {
+                                    "hash":  "6FD0FAC91BFF7420",
+                                    "pose":  {
+                                                 "position":  [
+                                                                  -3075.13,
+                                                                  1150.55,
+                                                                  -217.989
+                                                              ],
+                                                 "rotation":  [
+                                                                  0.046846,
+                                                                  -0.953161,
+                                                                  0.21131,
+                                                                  0.21131
+                                                              ]
+                                             }
+                                },
     "cabin-trees-12":  {
-                           "hash":  "E6BC15DAE7A9A350",
+                           "hash":  "F293287C63A027F5",
                            "pose":  {
                                         "position":  [
                                                          -3046.1,
@@ -208,7 +272,7 @@
                                     }
                        },
     "cabin-trees-16":  {
-                           "hash":  "8B4C42B7B96612B9",
+                           "hash":  "204A60BD86D6047D",
                            "pose":  {
                                         "position":  [
                                                          -3046.1,
@@ -224,7 +288,7 @@
                                     }
                        },
     "cabin-trees-22":  {
-                           "hash":  "8EE402E49D7103B2",
+                           "hash":  "7C1E65BD24AAAD09",
                            "pose":  {
                                         "position":  [
                                                          -3046.1,
@@ -240,7 +304,7 @@
                                     }
                        },
     "cabin-trees-8":  {
-                          "hash":  "907EFA94E891D3B0",
+                          "hash":  "010D55B821D7FA6E",
                           "pose":  {
                                        "position":  [
                                                         -3046.1,
@@ -256,7 +320,7 @@
                                    }
                       },
     "cabin-wall-12":  {
-                          "hash":  "7D4863D4E3269597",
+                          "hash":  "D96F5E8F6EEC9AED",
                           "pose":  {
                                        "position":  [
                                                         -3071.406,
@@ -272,7 +336,7 @@
                                    }
                       },
     "cabin-wall-16":  {
-                          "hash":  "6B0A6BD8C81D621B",
+                          "hash":  "74C9A86E20A31D12",
                           "pose":  {
                                        "position":  [
                                                         -3071.406,
@@ -288,7 +352,7 @@
                                    }
                       },
     "cabin-wall-22":  {
-                          "hash":  "6F868004EC973032",
+                          "hash":  "689CA7EFC58D5AB0",
                           "pose":  {
                                        "position":  [
                                                         -3071.406,
@@ -304,7 +368,7 @@
                                    }
                       },
     "cabin-wall-8":  {
-                         "hash":  "29DACB82E225497B",
+                         "hash":  "C76142F9FFE0AB07",
                          "pose":  {
                                       "position":  [
                                                        -3071.406,
@@ -320,7 +384,7 @@
                                   }
                      },
     "cabin-window-glow-12":  {
-                                 "hash":  "AA07FBC4B4B8FAAE",
+                                 "hash":  "8510E005A1BE668B",
                                  "pose":  {
                                               "position":  [
                                                                -3073.152,
@@ -336,7 +400,7 @@
                                           }
                              },
     "cabin-window-glow-16":  {
-                                 "hash":  "7CE7EB1ABCDCCF29",
+                                 "hash":  "2C6E7F232DFD6B1A",
                                  "pose":  {
                                               "position":  [
                                                                -3073.152,
@@ -352,7 +416,7 @@
                                           }
                              },
     "cabin-window-glow-22":  {
-                                 "hash":  "FE4D1601D0C7479E",
+                                 "hash":  "2EC679FFECE9BA67",
                                  "pose":  {
                                               "position":  [
                                                                -3073.152,
@@ -368,7 +432,7 @@
                                           }
                              },
     "cabin-window-glow-8":  {
-                                "hash":  "90E942BA96677FD3",
+                                "hash":  "CA42E6704861A85A",
                                 "pose":  {
                                              "position":  [
                                                               -3073.152,
@@ -384,7 +448,7 @@
                                          }
                             },
     "leak-room-12":  {
-                         "hash":  "AE55ABA8E51625BB",
+                         "hash":  "AC6E142689363315",
                          "pose":  {
                                       "position":  [
                                                        -3069.87,
@@ -400,7 +464,7 @@
                                   }
                      },
     "leak-room-16":  {
-                         "hash":  "306C3BBB249347E5",
+                         "hash":  "19C604501EDB3776",
                          "pose":  {
                                       "position":  [
                                                        -3069.87,
@@ -416,7 +480,7 @@
                                   }
                      },
     "leak-room-22":  {
-                         "hash":  "D991A3355B226C28",
+                         "hash":  "64F8E390FE22AFD6",
                          "pose":  {
                                       "position":  [
                                                        -3069.87,
@@ -432,7 +496,7 @@
                                   }
                      },
     "leak-room-8":  {
-                        "hash":  "B28B2C2942064A9A",
+                        "hash":  "085CFE609EB809D9",
                         "pose":  {
                                      "position":  [
                                                       -3069.87,

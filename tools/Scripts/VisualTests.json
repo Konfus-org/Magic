@@ -31,11 +31,11 @@
     "moveHeld": 30,
     "light": 40
   },
-  "waitSeconds": {
-    "settle": 25,
-    "angle": 4,
-    "beforeMove": 3,
-    "light": 15
+  "waitFrames": {
+    "settle": 120,
+    "angle": 30,
+    "beforeMove": 20,
+    "light": 90
   },
   "turnSpeedsPerSecond": [6, 20, 120, 360],
   "turnSeconds": 1.5,

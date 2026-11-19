@@ -29,7 +29,7 @@ internal sealed class ClusterPasses
 
     private const int DrawArgumentsBytes = 16;
 
-    private const int DrawRegions = (int)DrawRegion.RetestedImpostors + 1;
+    private const int DrawRegions = (int)DrawRegion.RetestedFadingDoubleSided + 1;
 
     private const int RetestArgumentsBytes = 12;
 
@@ -58,6 +58,10 @@ internal sealed class ClusterPasses
     private readonly DrawShaders _drawShaders;
 
     private readonly DrawShaders _fadingShaders;
+
+    private readonly DrawShaders _doubleSidedShaders;
+
+    private readonly DrawShaders _fadingDoubleSidedShaders;
 
     private readonly DrawShaders _glassShaders;
 
@@ -99,6 +103,12 @@ internal sealed class ClusterPasses
         {
             Pixel = PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityFadingPixel", ShaderStage.Pixel),
         };
+        // A cluster of a double-sided material, both faces, with and without the dither.
+        _doubleSidedShaders = _drawShaders with
+        {
+            Cull = CullMode.None,
+        };
+        _fadingDoubleSidedShaders = _fadingShaders with { Cull = CullMode.None };
         // A translucent cluster, both faces, into the glass's buffer and depth where nothing opaque is nearer.
         _glassShaders = _drawShaders with
         {
@@ -273,6 +283,13 @@ internal sealed class ClusterPasses
             .Dispatch(across, down);
         Draw("Draw visibility", _drawShaders, GetTargets(TargetLoad.Clear), DrawRegion.Visible);
         Draw("Draw fading", _fadingShaders, GetTargets(TargetLoad.Keep), DrawRegion.Fading);
+        Draw("Draw double-sided", _doubleSidedShaders, GetTargets(TargetLoad.Keep), DrawRegion.VisibleDoubleSided);
+        Draw(
+            "Draw fading double-sided",
+            _fadingDoubleSidedShaders,
+            GetTargets(TargetLoad.Keep),
+            DrawRegion.FadingDoubleSided
+        );
         DrawImpostors("Draw impostors", DrawRegion.Impostors);
         BuildDepthPyramid(GpuTexture.None);
 
@@ -294,6 +311,18 @@ internal sealed class ClusterPasses
             .DispatchIndirect(retestArguments.Value, 0);
         Draw("Draw retested", _drawShaders, GetTargets(TargetLoad.Keep), DrawRegion.Retested);
         Draw("Draw retested fading", _fadingShaders, GetTargets(TargetLoad.Keep), DrawRegion.RetestedFading);
+        Draw(
+            "Draw retested double-sided",
+            _doubleSidedShaders,
+            GetTargets(TargetLoad.Keep),
+            DrawRegion.RetestedDoubleSided
+        );
+        Draw(
+            "Draw retested fading double-sided",
+            _fadingDoubleSidedShaders,
+            GetTargets(TargetLoad.Keep),
+            DrawRegion.RetestedFadingDoubleSided
+        );
         DrawImpostors("Draw retested impostors", DrawRegion.RetestedImpostors);
 
         // The picture cleared before the material resolve writes emissive light into it, so a pixel that no resolve
@@ -459,7 +488,8 @@ internal sealed class ClusterPasses
     /// <remarks>
     /// Each region is as many draws as the visible list has rows, counted at word <c>region * 4</c> of the counts. The
     /// regions are the clusters that last frame's depth pyramid shows and those the retest finds this frame's shows,
-    /// the same of the instances in the impostor handoff, the translucent clusters of both, and the impostors of both.
+    /// the same of the instances in the impostor handoff, the translucent clusters of both, the impostors of both, and
+    /// the first four again for the clusters of a double-sided material.
     /// </remarks>
     private enum DrawRegion
     {
@@ -470,5 +500,9 @@ internal sealed class ClusterPasses
         Glass,
         Impostors,
         RetestedImpostors,
+        VisibleDoubleSided,
+        RetestedDoubleSided,
+        FadingDoubleSided,
+        RetestedFadingDoubleSided,
     }
 }

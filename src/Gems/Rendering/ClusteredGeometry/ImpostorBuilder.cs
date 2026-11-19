@@ -27,6 +27,17 @@ internal static class ImpostorBuilder
     public const int Size = Views * Tile;
 
     /// <summary>
+    /// Texels down an atlas: the nearest face of each texel over the nearest front face of the same texel, which the
+    /// impostor shows where the nearest face is the back face of a single-sided material.
+    /// </summary>
+    public const int Height = Size * 2;
+
+    /// <summary>
+    /// Added to a texel's material slot where the view saw a back face, the gem's <c>ImpostorBackFace</c>.
+    /// </summary>
+    public const uint BackFace = 8;
+
+    /// <summary>
     /// Bakes the atlas as RGBA16F halves, the texture coordinates of the same texels as RG16F halves, row by row, and
     /// each view's silhouette bounds as <see cref="ModelClusters.ImpostorViewBounds"/> says.
     /// </summary>
@@ -38,8 +49,8 @@ internal static class ImpostorBuilder
         float radius
     )
     {
-        Half[] texels = new Half[Size * Size * 4];
-        Half[] uvs = new Half[Size * Size * 2];
+        Half[] texels = new Half[Size * Height * 4];
+        Half[] uvs = new Half[Size * Height * 2];
         uint[] viewBounds = new uint[Views * Views];
 
         // The cut the GPU's cull makes when the error it may show is a texel of a view: a cluster whose own error is
@@ -53,7 +64,9 @@ internal static class ImpostorBuilder
         {
             (Vector3 forward, Vector3 right, Vector3 up) = GetViewFrame(viewX, viewY);
             float[] depth = new float[Tile * Tile];
+            float[] frontDepth = new float[Tile * Tile];
             Array.Fill(depth, float.MaxValue);
+            Array.Fill(frontDepth, float.MaxValue);
             foreach (GpuCluster cluster in clusters)
             {
                 if (cluster.Error > texelError || cluster.ParentError <= texelError)
@@ -90,10 +103,10 @@ internal static class ImpostorBuilder
                 Vector3 nb = GpuPacker.DecodeUnitVector(b.Normal);
                 Vector3 nc = GpuPacker.DecodeUnitVector(c.Normal);
 
-                // A triangle facing away from the view is left out, as the cluster draw culls it, so the impostor
-                // shows what the clusters it hands off from show.
-                if (Vector3.Dot(na + nb + nc, forward) <= 0)
-                    return;
+                // A triangle facing away from the view keeps its normal turned to the view and its texel marked as a
+                // back face: the impostor shows it only for a double-sided material, as the cluster draw does.
+                bool isBack = Vector3.Dot(na + nb + nc, forward) <= 0;
+                float side = isBack ? -1 : 1;
                 for (int y = minY; y <= maxY; y++)
                 {
                     for (int x = minX; x <= maxX; x++)
@@ -106,20 +119,31 @@ internal static class ImpostorBuilder
                             continue;
 
                         float z = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
-                        if (z >= depth[(y * Tile) + x])
-                            continue;
-
-                        depth[(y * Tile) + x] = z;
-                        Vector3 normal = Vector3.Normalize((wa * na) + (wb * nb) + (wc * nc));
-                        Vector2 flat = GpuPacker.EncodeOctahedral(normal);
                         int texel = ((((viewY * Tile) + y) * Size) + (viewX * Tile) + x) * 4;
-                        texels[texel] = (Half)flat.X;
-                        texels[texel + 1] = (Half)flat.Y;
-                        texels[texel + 2] = (Half)Math.Clamp(z, 0, 1);
-                        texels[texel + 3] = (Half)(slot + 1);
-                        Vector2 uv = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
-                        uvs[texel / 2] = (Half)uv.X;
-                        uvs[(texel / 2) + 1] = (Half)uv.Y;
+                        if (z < depth[(y * Tile) + x])
+                        {
+                            depth[(y * Tile) + x] = z;
+                            Write(texel);
+                        }
+
+                        if (!isBack && z < frontDepth[(y * Tile) + x])
+                        {
+                            frontDepth[(y * Tile) + x] = z;
+                            Write(texel + (Size * Size * 4));
+                        }
+
+                        void Write(int at)
+                        {
+                            Vector3 normal = side * Vector3.Normalize((wa * na) + (wb * nb) + (wc * nc));
+                            Vector2 flat = GpuPacker.EncodeOctahedral(normal);
+                            texels[at] = (Half)flat.X;
+                            texels[at + 1] = (Half)flat.Y;
+                            texels[at + 2] = (Half)Math.Clamp(z, 0, 1);
+                            texels[at + 3] = (Half)(slot + 1 + (isBack ? BackFace : 0));
+                            Vector2 uv = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
+                            uvs[at / 2] = (Half)uv.X;
+                            uvs[(at / 2) + 1] = (Half)uv.Y;
+                        }
                     }
                 }
             }

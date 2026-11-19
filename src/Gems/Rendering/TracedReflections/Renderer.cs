@@ -42,6 +42,11 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
     private const float SettleHistory = 0.8f; // PROTO
     private const int SettleFrames = 14; // PROTO
 
+    /// <summary>
+    /// The bytes of a <c>ReflectionHit</c> in <c>TraceReflections.slang</c>: 16 words.
+    /// </summary>
+    private const int HitBytes = 64;
+
     private static readonly string[] _blendNames = ["Reflection light 0", "Reflection light 1"];
 
     /// <summary>
@@ -61,6 +66,14 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
     /// </summary>
     private readonly ShaderEntry _traceShader;
     private readonly ShaderEntry _resolveShader;
+
+    /// <summary>
+    /// The hits' shading, generic over a material shader, and its entries specialised on each of the world's material
+    /// shaders by their place. The hits' light is generic over the sky, as the trace is.
+    /// </summary>
+    private readonly ShaderEntry _shadeShader;
+    private readonly List<ShaderEntry> _shadeShaders = [];
+    private readonly ShaderEntry _lightShader;
     private readonly ShaderEntry _blendShader;
 
     /// <summary>
@@ -104,6 +117,8 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         _traceShader = PassShaders.GetEntry(assets, "TraceReflections", "TraceReflections");
         _openSky = SkyTables.GetOpenSky(assets);
         _resolveShader = PassShaders.GetEntry(assets, "TraceReflections", "ResolveReflections");
+        _shadeShader = PassShaders.GetEntry(assets, "TraceReflections", "ShadeReflectionHits");
+        _lightShader = PassShaders.GetEntry(assets, "TraceReflections", "LightReflectionHits");
         _blendShader = PassShaders.GetEntry(assets, "TraceReflections", "BlendReflections");
 
         // Without rays nothing is traced, so the renderer holds no domain back.
@@ -166,10 +181,35 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
         // The trace on the sky's type and on the open sky are both built, as a domain's frames take either.
-        GpuState shaders = _gpu.GetState(_traceShader with { TypeArguments = _openSky }, _resolveShader, _blendShader);
-        GpuState skyShader = _gpu.GetState(_traceShader with { TypeArguments = input.Sky?.SkyType ?? _openSky });
+        ImmutableArray<ShaderTypeArgument> skyType = input.Sky?.SkyType ?? _openSky;
+        GpuState shaders = _gpu.GetState(
+            _traceShader with
+            {
+                TypeArguments = _openSky,
+            },
+            _lightShader with
+            {
+                TypeArguments = _openSky,
+            },
+            _resolveShader,
+            _blendShader
+        );
+        GpuState skyShader = _gpu.GetState(
+            _traceShader with
+            {
+                TypeArguments = skyType,
+            },
+            _lightShader with
+            {
+                TypeArguments = skyType,
+            }
+        );
         if (skyShader != GpuState.Ready && shaders != GpuState.Failed)
             shaders = skyShader;
+
+        GpuState shadeShaders = _gpu.GetState(GetShadeShaders(gpu.MaterialShaders));
+        if (shadeShaders != GpuState.Ready && shaders != GpuState.Failed)
+            shaders = shadeShaders;
 
         if (shaders != GpuState.Loading)
             _built.TrySetResult();
@@ -231,7 +271,18 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         Result<GpuSampler> sampler = _gpu.GetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        Result asked = Result.FindFailure(constants, reflections, depthHistory, sampler);
+        // PROTO: last frame's lit picture, which a copy at the start of the post effects keeps for the screen trace.
+        Result<GpuTexture> picture = _gpu.GetTexture(
+            new(
+                "Reflected picture",
+                gpu.Width,
+                gpu.Height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Sampled | TextureUsages.CopyDestination
+            ),
+            frame.View
+        );
+        Result asked = Result.FindFailure(constants, reflections, depthHistory, sampler, picture);
         if (!asked.Ok)
         {
             _settling.End();
@@ -255,6 +306,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
                 0,
                 1
             ),
+            Picture = gpu.HasHistory && lastTraced == tracedSize ? picture.Value : GpuTexture.None,
         };
         // Not staged: nothing is recorded, and the frame's row keeps no reflections, which the shaders read as none.
         if (!graph.Upload(view.Constants, [reflection]))
@@ -265,6 +317,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
             return null;
 
         Record(view, light, reflection);
+        graph.Copy(gpu.Hdr, picture.Value, RenderStages.Post);
         _reflected[frame.View] = (tracedSize, frames);
         if (frame.View == 0 && frames >= SettleFrames)
             _settling.End();
@@ -314,8 +367,16 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
             view.GetTraced("Reflection distance", GpuFormat.R32Sfloat),
             view.Index
         );
+        Result<GpuBuffer> hits = gpu.GetBuffer(
+            new("Reflection hits", (long)view.TracedSize.Width * view.TracedSize.Height * HitBytes),
+            view.Index
+        );
+        Result<GpuTexture> screen = gpu.GetTexture(
+            view.GetTraced("Screen reflections", GpuFormat.R16G16B16A16Sfloat),
+            view.Index
+        );
         Result<TracedBlendConstants> blend = TracedBlend.Prepare(gpu, view, _blendNames, frameIndex, hasHistory);
-        if (Result.FindFailure(traced, rays, resolved, distance, blend) is { Ok: false } failed)
+        if (Result.FindFailure(traced, rays, resolved, distance, hits, screen, blend) is { Ok: false } failed)
             return Result.Failure(failed.Error);
 
         return Result.Success(
@@ -325,6 +386,8 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
                 Rays = rays.Value,
                 Resolved = resolved.Value,
                 Distance = distance.Value,
+                Hits = hits.Value,
+                Screen = screen.Value,
                 Blend = blend.Value,
             }
         );
@@ -344,6 +407,7 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
         TracedReflectionConstants reflections = reflection.Reflections;
         (int width, int height) = view.TracedSize;
         GpuConstants header = view.Header;
+        ReadOnlySpan<GpuResource> picture = reflection.Picture.IsNone ? [] : [reflection.Picture];
         graph
             .Compute(
                 "Trace reflections",
@@ -356,8 +420,45 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
             )
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal, view.Gpu.GBufferSurface)
+            .Reads(light.Probes, light.ProbeDepth, view.Gpu.Velocity)
+            .Reads(picture)
+            .Writes(reflections.Traced, reflections.Rays, reflections.Hits, reflections.Screen)
+            .DispatchOver(width, height);
+
+        // Each hit's material evaluated where the ray landed, a pass for each material shader, which shades the hits
+        // on the surfaces it draws.
+        GpuBuffer hits = reflections.Hits;
+        ReadOnlySpan<ShaderEntry> shades = CollectionsMarshal.AsSpan(_shadeShaders);
+        for (int shader = 0; shader < shades.Length; shader++)
+        {
+            graph
+                .Compute(
+                    "Shade reflection hits",
+                    shades[shader],
+                    new GpuConstants(header.X, header.Y, (uint)shader),
+                    RenderStages.Light
+                )
+                .Reads(view.World.AsSpan())
+                .Reads(view.Gpu.HeapTextures.AsSpan())
+                .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Materials, reflections.Traced, reflections.Rays)
+                .Writes(hits)
+                .DispatchOver(width, height);
+        }
+
+        graph
+            .Compute(
+                "Light reflection hits",
+                _lightShader with
+                {
+                    TypeArguments = view.SkyType,
+                },
+                header,
+                RenderStages.Light
+            )
+            .Reads(view.World.AsSpan())
+            .Reads(view.Gpu.Frame, view.Constants, reflections.Rays, hits, reflections.Screen)
             .Reads(light.Probes, light.ProbeDepth)
-            .Writes(reflections.Traced, reflections.Rays)
+            .Writes(reflections.Traced)
             .DispatchOver(width, height);
         graph
             .Compute("Resolve reflections", _resolveShader, header, RenderStages.Light)
@@ -388,5 +489,18 @@ public sealed class Renderer : IRender<TracedReflectionsInput, Reflections>, IHo
             )
             .Writes(reflections.Blend.Light)
             .DispatchOver(width, height);
+    }
+
+    /// <summary>
+    /// Gets the hits' shading specialised on each of <paramref name="materialShaders"/>, by its place.
+    /// </summary>
+    private ReadOnlySpan<ShaderEntry> GetShadeShaders(IReadOnlyList<ShaderTypeArgument> materialShaders)
+    {
+        for (int shader = _shadeShaders.Count; shader < materialShaders.Count; shader++)
+        {
+            _shadeShaders.Add(_shadeShader with { TypeArguments = [materialShaders[shader]] });
+        }
+
+        return CollectionsMarshal.AsSpan(_shadeShaders);
     }
 }

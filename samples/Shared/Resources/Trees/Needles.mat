@@ -2,6 +2,7 @@
     "shader": {
         "id": 10001
     },
+    "isDoubleSided": true,
     "params": {
         "color": {
             "r": 0.1,

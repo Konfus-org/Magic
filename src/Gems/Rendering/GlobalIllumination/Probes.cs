@@ -36,7 +36,7 @@ internal sealed class Probes(AssetManager assets, IGraphicsApi gpu)
     /// The rays all the probes trace in a frame, and the most rays a probe traces in a frame, which it traces before it
     /// first blends its rays: the twins of <c>UpdateProbes.slang</c>'s.
     /// </summary>
-    private const int RayBudget = 131072;
+    private const int RayBudget = 1048576;
     private const int MaxProbeRays = 256;
 
     /// <summary>

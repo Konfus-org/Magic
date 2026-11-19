@@ -12,7 +12,8 @@ namespace Magic.GlobalIllumination;
 /// </summary>
 /// <remarks>
 /// A few rays go from a pixel of each traced pixel's footprint. The lights and the probes light them where they land, and
-/// the probes' light is used where they reach nothing within range. The trace writes NRD's inputs, which the
+/// the probes' light is used where they reach nothing within range. A hit that the screen showed last frame takes the
+/// light of the screen there in place of the probes'. The trace writes NRD's inputs, which the
 /// <see cref="Denoiser"/> turns into the light that shading reads.
 /// </remarks>
 internal sealed class TracedDiffuse(AssetManager assets)
@@ -56,7 +57,11 @@ internal sealed class TracedDiffuse(AssetManager assets)
         );
     }
 
-    public void RecordTrace(in GIView view, in ProbeGridConstants grid, in GIConstants gi)
+    /// <summary>
+    /// Records the trace, which lights a hit on the screen with <paramref name="lastLight"/>, last frame's denoised
+    /// light, before this frame's denoise writes it again.
+    /// </summary>
+    public void RecordTrace(in GIView view, in ProbeGridConstants grid, in GIConstants gi, GpuTexture lastLight)
     {
         TracedDiffuseConstants diffuse = gi.Diffuse;
         (int width, int height) = view.TracedSize;
@@ -71,7 +76,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
             )
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal, view.Gpu.Velocity)
-            .Reads(grid.Probes, grid.Depth)
+            .Reads(grid.Probes, grid.Depth, lastLight, gi.DepthHistory)
             .Writes(diffuse.Traced, diffuse.Radiance, diffuse.Motion, diffuse.NormalRoughness, diffuse.ViewZ)
             .DispatchOver(width, height);
     }

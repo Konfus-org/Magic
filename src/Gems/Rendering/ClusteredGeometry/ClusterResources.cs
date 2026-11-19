@@ -199,13 +199,14 @@ internal sealed class ClusterResources(
     }
 
     /// <summary>
-    /// Describes an impostor atlas of <see cref="ImpostorBuilder.Size"/> texels a side, in <paramref name="format"/>.
+    /// Describes an impostor atlas of <see cref="ImpostorBuilder.Size"/> texels across and
+    /// <see cref="ImpostorBuilder.Height"/> down, in <paramref name="format"/>.
     /// </summary>
     private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
         new(
             name,
             ImpostorBuilder.Size,
-            ImpostorBuilder.Size,
+            ImpostorBuilder.Height,
             format,
             TextureUsages.Sampled | TextureUsages.CopyDestination
         );

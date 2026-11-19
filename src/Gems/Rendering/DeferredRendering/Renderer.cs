@@ -726,8 +726,10 @@ public sealed class Renderer
             PreparedDomains = world.PreparedDomains,
         };
 
-        // The camera jitters while the picture's effects ask for it, or while a gem upscales.
-        bool isJittered = input.Upscaling is not null || input.Effects is { IsJittered: true };
+        // The camera jitters while the picture's effects ask for it, or while a gem upscales. A frame that an HDR
+        // screenshot takes does not, so the frame holds the light of the pixels' middles and no edge moves between two
+        // such frames. The resolve takes that frame as one more sample.
+        bool isJittered = (input.Upscaling is not null || input.Effects is { IsJittered: true }) && !IsHdrAsked();
 
         Result uploaded = frameView.Upload(
             graph,
@@ -867,10 +869,12 @@ public sealed class Renderer
         }
 
         // An HDR screenshot: the lit light of the last view of the window before the effects expose it, read back as
-        // it is, at the view's size.
+        // it is, at the view's size, from a frame with no jitter. One asked after the view took its jitter waits a
+        // frame.
         if (
             _screenshots.Reader.TryPeek(out ScreenshotRequested asked)
             && IsHdr(asked.Path)
+            && gpu.Constants.Jitter == Vector2.Zero
             && gpu.Target == _gpu.WindowTarget
             && frame.View == input.Views.Count - 1
         )
@@ -1152,6 +1156,8 @@ public sealed class Renderer
     }
 
     private static bool IsHdr(string path) => path.EndsWith(".pfm", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsHdrAsked() => _screenshots.Reader.TryPeek(out ScreenshotRequested asked) && IsHdr(asked.Path);
 
     /// <summary>
     /// Fills the window with black before the views draw into it, with no shader.

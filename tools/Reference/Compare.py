@@ -142,9 +142,12 @@ def compare(view, pose, args):
             raise SystemExit(f'The mask is {sky.shape}, the picture is {lit.shape}: render it at the same size.')
         lit &= ~sky
 
-    # A reference that lights no pixel says nothing about a ratio, a colour or a noise. Its pictures take the exposure
+    # The ratio over patches of pixels, where the reference's own noise cancels.
+    patches = Metrics.patch_ratios(magic_light, reference_light, lit)
+
+    # A reference that lights no patch says nothing about a ratio, a colour or a noise. Its pictures take the exposure
     # of the leak limit, which puts that limit at the middle grey, so a leak shows.
-    if not lit.any():
+    if patches.size == 0:
         exposure = Photograph.exposure_for_leak(Settings.limit('leakNits')['max'])
         pictures = write_pictures(args.out, magic, reference, exposure)
         return {'rows': leak_rows(view, pose, magic, width, height), 'pictures': pictures}
@@ -163,8 +166,6 @@ def compare(view, pose, args):
     print(f'ratio.png  {os.path.join(args.out, "ratio.png")}')
     print(f'flip.png   {os.path.join(args.out, "flip.png")}')
 
-    # The ratio over patches of pixels, where the reference's own noise cancels.
-    patches = Metrics.patch_ratios(magic_light, reference_light, lit)
     still_light = [Metrics.luminance(frame) for frame in frames]
     rows = [
         {'name': 'patch ratio median', 'value': float(np.median(patches)), 'limit': 'patchRatioMedian'},

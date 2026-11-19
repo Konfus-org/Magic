@@ -268,7 +268,8 @@ public float4 GetNeighbourAverage(NeighbourLight neighbours, float3 own)
     return float4(max(result.rgb, 1e-5), result.a);
 }
 
-// The mean and deviation of the 3 by 3 traced pixels' light around one.
+// The mean and deviation of the 5 by 5 traced pixels' light around one: a box wide enough that one frame's noise
+// hardly moves it.
 public struct Neighbourhood
 {
     public float3 mean;
@@ -279,17 +280,17 @@ public Neighbourhood GetNeighbourhood(TextureRef light, uint2 traced, uint2 size
 {
     float3 sum = float3(0.0);
     float3 squares = float3(0.0);
-    for (uint i = 0u; i < 9u; i++)
+    for (uint i = 0u; i < 25u; i++)
     {
-        uint2 neighbour = uint2(clamp(int2(traced) + int2(i % 3u, i / 3u) - 1, int2(0), int2(size) - 1));
+        uint2 neighbour = uint2(clamp(int2(traced) + int2(i % 5u, i / 5u) - 2, int2(0), int2(size) - 1));
         float3 color = light.Load(neighbour, 0u).rgb;
         sum += color;
         squares += color * color;
     }
 
     Neighbourhood neighbourhood;
-    neighbourhood.mean = sum / 9.0;
-    neighbourhood.deviation = sqrt(max(squares / 9.0 - neighbourhood.mean * neighbourhood.mean, 0.0));
+    neighbourhood.mean = sum / 25.0;
+    neighbourhood.deviation = sqrt(max(squares / 25.0 - neighbourhood.mean * neighbourhood.mean, 0.0));
     return neighbourhood;
 }
 

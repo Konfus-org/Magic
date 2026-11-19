@@ -1,10 +1,12 @@
 // The atmosphere's three tables, made ahead of each frame: transmittance through the air by height and direction,
 // the light every direction scatters again by height and sun, and the sky as seen from the camera's height. The
-// pass header's x is the frame's buffer, which holds the lights and the tables' ids.
+// pass header's x is the frame's buffer, which holds the lights and the tables' ids. The sky-view pass's y, z and w
+// hold the fit to Blender's sky (C#'s SkyCalibration).
 module "SkyLuts";
 
 import Core.Heap;
 import Core.Math;
+import Core.Pass;
 import Scene.Lights;
 import Sky.Atmosphere;
 
@@ -61,6 +63,17 @@ void FillSkyMultiScattering(uint3 group : SV_GroupID, uint direction : SV_GroupI
     target.Store(group.xy, float4(luminance / max(1.0 - multi, Epsilon), 1.0));
 }
 
+// The gain on each channel that fits the sky to Blender's: the header's two halves of each channel, the gain and its
+// change by the light's height, over the light's colour, which Blender's sky does not take.
+float3 GetCalibration(Lights lights)
+{
+    PassHeader header = GetPassHeader();
+    uint3 packed = uint3(header.y, header.z, header.w);
+    float3 gain = f16tof32(packed & 0xFFFFu) + f16tof32(packed >> 16u) * saturate(lights.sunDirection.y);
+    float3 light = lights.sunIlluminance.rgb;
+    return gain * (Max3(light) > 0.0 ? Max3(light) / max(light, float3(Epsilon)) : float3(1.0));
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void FillSkyView(uint3 thread : SV_DispatchThreadID)
@@ -77,8 +90,9 @@ void FillSkyView(uint3 thread : SV_DispatchThreadID)
     float3 direction = ToSkyViewDirection(GetTexelCenterUv(thread.xy, SkyViewLutSize), altitude);
     StorageRef target = { tables.view, 0u };
 
-    // The sky's brightness is in the table, so the sky that is seen, the light it gives the surfaces, the probes and
-    // the reflections all take it, and the sun's light, which comes from the transmittance table, does not.
+    // The sky's brightness and its fit to Blender's sky are in the table, so the sky that is seen, the light it gives
+    // the surfaces, the probes and the reflections all take them, and the sun's light, which comes from the
+    // transmittance table, does not.
     float3 sky = GetSkyView(transmittance, multi, sampler, direction, lights.sunDirection.xyz, altitude);
-    target.Store(thread.xy, float4(sky * tables.brightness, 1.0));
+    target.Store(thread.xy, float4(sky * tables.brightness * GetCalibration(lights), 1.0));
 }

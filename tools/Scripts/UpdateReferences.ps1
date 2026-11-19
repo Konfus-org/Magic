@@ -114,7 +114,7 @@ foreach ($project in @($jobs.View.project | Sort-Object -Unique)) {
     $here = @($jobs | Where-Object { $_.View.project -eq $project })
     Write-Output ("Rendering $($here.Count) reference(s) of $project at $($size -join ' x '), $Samples samples, " +
         'from one build of the scene.')
-    $list = Join-Path ([IO.Path]::GetTempPath()) 'UpdateReferences-jobs.json'
+    $list = Join-Path (Get-WorkRoot) 'UpdateReferences-jobs.json'
     # The mask is of the view alone, because it comes from the alpha of the render and every hour of a view masks the
     # same pixels, so the first job of each view writes it and the others read it.
     $masked = @{}

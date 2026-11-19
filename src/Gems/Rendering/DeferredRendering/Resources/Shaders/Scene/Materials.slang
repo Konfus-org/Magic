@@ -13,12 +13,16 @@ public static const uint GpuMaterialBytes = 80u;
 // not with the opaque surfaces.
 public static const uint TranslucentBit = 0x80000000u;
 
+// The shader word's bit for a double-sided material's row, C#'s GpuMaterial.DoubleSidedBit: its back faces draw, and a
+// ray that lands on one lands on a surface.
+public static const uint DoubleSidedBit = 0x40000000u;
+
 // The shader word's bits for the material shader's number, and where its failure index starts and the bits it takes.
 // A project numbers each material shader it draws once, and each takes a pipeline and a resolve pass a frame, so
 // 4096 is far more than one draws. The failure table has a row for each thing that failed.
 static const uint MaterialShaderMask = 0xFFFu;
 static const uint FailureIndexShift = 12u;
-static const uint FailureIndexMask = 0x7FFFFu;
+static const uint FailureIndexMask = 0x3FFFFu;
 
 uint LoadShaderWord(uint table, uint row)
 {
@@ -37,6 +41,9 @@ public uint LoadFailureIndex(uint table, uint row)
 
 // Whether the row's shader is translucent, as glass is.
 public bool IsTranslucent(uint table, uint row) { return (LoadShaderWord(table, row) & TranslucentBit) != 0u; }
+
+// Whether the row's material is double-sided.
+public bool IsDoubleSided(uint table, uint row) { return (LoadShaderWord(table, row) & DoubleSidedBit) != 0u; }
 
 // The row's params as the struct of the material shader that draws it.
 public T LoadMaterialParams<T>(uint table, uint row)

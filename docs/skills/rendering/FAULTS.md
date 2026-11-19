@@ -80,9 +80,39 @@ still and in motion.
   - A probe's L1 harmonics spread a window's narrow lobe of light in every direction. A probe beside the window gave
     the sill 177 where its own rays found 28 (`d1d19fa6`).
   - The light of a probe is added at each ray hit, and the room's probes hold 3 to 10 times the traced light
-    (`GetHitLight` in `Traced.slang`).
+    (`GetHitLight` in `Traced.slang`). At hour 12, two runs of the same code and pose give the probes' light 2 times
+    apart, so one run of a change to the probes proves nothing. Measure each change with two runs or more.
+    The probes' light wanders within one run, held still: over 12 s, one tile column goes from 24 to 14 and another
+    from 116 to 152 to 100. Each run's shot catches the wander at a different point. A probe's texel varies by 1.2 to
+    1.6 times its short mean between updates, and the short mean holds about 2 updates (`ProbeUpdateSpeed` 0.5). So
+    the short mean strays past `ChangeRatio` from noise alone, the mean jumps to it, and the mean catches up 0.1 to 0.25
+    of the way to each noisy value. Not the cause: the firefly clip, or a slow hold of the mean.
+  - A probe ray that lands on a back face brought back the light of that face, where a diffuse ray brings back none.
+  - The probes' rays changed each update in a still scene. Each frame turned the ray set by a new random rotation and
+    took new random points on the lights, and each probe's count of rays followed how much its light changed (172 to
+    232 rays between shots), and each count gave another set of rays. With fixed rays, fixed light samples and a count
+    fixed by cascade and view, a tile moves by less than 2.5 % in 12 s, where it moved by 40 to 70 %.
+  - A probe's texel that no ray of an update reached took black as its new light, and the mean jumped to it past
+    `ChangeRatio`. Few rays, as a probe out of view traces, often leave a texel with none.
+  - A pale band on the wall beside the shelf by day. A diffuse ray from the wall hits the shelf's side, which is at a
+    right angle to the wall. The side faces a probe 0.4 m in front of the window, which the wall does not face, and
+    reads 127 from it where the wall reads 37. No probe outside the cabin adds light there. Now a diffuse ray's hit
+    that the screen shows takes last frame's denoised diffuse light there, and only a hit off the screen takes the
+    probes' light (`GetScreenIndirect` in `TraceDiffuse.slang`). At hour 12, the wall to the left of the shelf went
+    from 2.00 to 1.45, and the left shoulder of the chimney from 1.74 to 1.49. The band to the right of the shelf
+    stays: the side of the shelf that faces that wall is not on the screen, so its hits still take the probes' light.
   - A diffuse ray that reached nothing within its range took the probes' light where it must take the sky
     (`8cc63416`).
+  - A diffuse or reflection ray started 0.01 m plus 4 pixels' width along the normal (`GetRayOffset` in
+    `HitSurface.slang`). At 6 m that is about 3.5 cm. On the top of a log at a seam, the pixel lies inside the log
+    above in the traced geometry, so the ray started past that log's inner side and brought in the light from outside.
+    This made a blue-white line, one pixel wide, along each seam of `cabin-wall` at hour 12. The traced light at the
+    seam was 0.79 blue to red, and on the log beside it 0.05. A ray now starts on its surface and passes only a near
+    inner side that faces the same way as the pixel, which is its own surface (`GetSurfaceHit` in `Trace/HitSurface.slang`).
+    A ray that passes every near inner side keeps the line, because it leaves the log above in the same way.
+  - The probes' light that fills a pixel where the traced light does not cover it is blue-white at a seam. With the
+    ray fix and `GlobalIllumination.IsPixelProbeLightOn false`, the seam is 0.032 blue to red, and the log 0.026.
+    With the probes' light on, it is 0.29 (`GetProbeIrradiance` in `Light/Probes.slang`). Not fixed yet.
 
 ## Brightness and the hour
 
@@ -103,6 +133,19 @@ still and in motion.
     2 rays a pixel (`4199b876`).
   - The room lacks the neutral light that comes in through its openings, so only the warm bounce of its own walls is
     left.
+- **Not the cause:**
+  - A diffuse ray that leaves through an opening and goes past its 10 m reach. It brings the room's probe light,
+    not the light of the far surface. A ray that went on to that surface did not change the room: the `cabin-room`
+    median at 12 stayed at 0.653 in two runs.
+  - The window glass. Magic's rays and Cycles both let 0.9 of the light through it, by its clarity.
+- **Part of the cause, proved:** the sky that the rays read is 0.63 / 0.68 / 0.77 of Cycles in R G B: Magic's sky
+  model and Blender's give different skies for the same light. With `GetSkyRadiance` raised to Cycles' sky, the
+  median at 12 went from 0.609 to 0.675 in `cabin-room` and from 0.516 to 0.557 in `cabin-wall`, in two runs each,
+  and the carpet's colour went from 0.51 to 0.31 off the reference. The user chose to fit Magic's sky to Blender's.
+  Measured against Blender's sky alone at 30 to 90 degrees over the horizon, Magic's sky was 0.54 to 0.68 of it in
+  red, 0.59 to 0.67 in green and 0.67 to 0.73 in blue, lower for a higher sun. Magic's sky also took the light's
+  colour, and Blender's takes only the light's brightest channel. The fit is `SkyCalibration` in the sky gem: a gain
+  on each channel by the light's height, which the sky-view table takes.
 
 ### Too dark or too bright outside
 
@@ -260,8 +303,13 @@ The user's rule: light and shadows must not depend on where the camera looks. On
   called it "a HUGE visual artifact". The fix below took the bright line away, and a lighter fringe stayed after it.
 - **Test:** the split picture at full size.
 - **Reject rule:** any rim fails.
-- **Cause proved:** a traced pixel was mapped to its picture pixel with float maths that fell one pixel short
-  (`5cf34751`).
+- **Causes proved:**
+  - A traced pixel was mapped to its picture pixel with float maths that fell one pixel short (`5cf34751`).
+  - A smooth surface in front of a rough one, as the steel ball, the mirror tray and the gear on the table of
+    `cabin-surfaces-close`. The rough taps behind the silhouette were not traced, so they lowered the coverage of the
+    reflection. The edge pixel then took the diffuse light, which is brighter, times the Fresnel near edge-on. The
+    coverage now counts only the taps on the pixel's own surface (`GetTracedTaps`). To find it, write the specular's
+    light, its Fresnel and its coverage to the HDR picture, and read them across the edge.
 
 ### Shadow acne and peter-panning
 
@@ -297,6 +345,11 @@ The user's rule: light and shadows must not depend on where the camera looks. On
   the turn frames and the frames held at the view's own pose after each move. Measure the frame-to-frame difference
   at the shadow edges over 30 frames of one run.
 - **Reject rule:** a shadow edge that moves while its caster and its light stand still fails.
+- **Causes proved:**
+  - A tile light took one shadow ray a frame. One ray is lit or not, and the blend with last frame's slot smooths
+    too little of it. So the soft shadow of the fire, a wide light, flickered all over the room at night. With 4 rays
+    a frame, the flicker of `cabin-room` at hour 22 fell from 0.0177 to 0.0122, where 0.0045 has the traced shadows
+    off (`342c302b`).
 
 ### A shadow cut off
 
@@ -320,6 +373,9 @@ The user's rule: light and shadows must not depend on where the camera looks. On
   - A ray start that passes thin legs.
   - A filter that washes a thin shadow out.
   - A trace at a part of the picture's scale, which misses thin occluders.
+  - A tile that lists more than 15 local lights. The shadow mask holds 15 of them. The shading loop of
+    `ShadeSurfaces.slang` also lights the pixel with the 16th light and each light after it, and `GetShadow` gives 1
+    for these, so they cast no shadow.
 
 ## Noise and time
 
@@ -329,6 +385,9 @@ The user's rule: light and shadows must not depend on where the camera looks. On
 - **Example:** before the denoiser change, the still spread at `cabin-wall` was 0.361. After it, 0.018. Blocky
   orange fireflies and dark blotches showed on the log wall while the camera turned, and they were still there at
   frame 30. `cabin-outside` at hour 12 gives 59 fireflies in a million, where the proposed limit is 50.
+  On a still view with the props held, the light at `cabin-room` at hour 12 moves by 0.039 from frame to frame, in
+  blobs on the log walls. With the light that bounces off, it moves by 0.005. At hour 22 the sun's and the lamps'
+  shadows move it most: 0.022, and 0.008 with the traced shadows off.
 - **Test:** the `fireflies in a million` row, which counts the pixels that are far brighter than the pixels about
   them in Magic and that the reference does not have. Then the turn frames at full size. The still spread of the
   frames, in `denoise.json`, gives the grain of a still picture.
@@ -340,6 +399,9 @@ The user's rule: light and shadows must not depend on where the camera looks. On
   - A rough surface traced for reflections draws a mottled pale face (`8e6b70c6`).
   - A history clamp so narrow that the grain of 2 rays fell outside it. The history was cut back to this frame's
     light each frame (`65474013`).
+  - A firefly clamp is a filter that lowers the mean. The diffuse trace held each pixel to 12 times the probes'
+    light. The probes do not see a small emitter, so the clamp took the glow bead's light off the table beside it:
+    0.05 nits where Cycles gives 26 at `cabin-surfaces-close` at hour 22.
 
 ### Noise at the screen's edges
 
@@ -425,6 +487,35 @@ The user's rule: light and shadows must not depend on where the camera looks. On
 - **Causes proved:**
   - Traced reflections on surfaces rougher than 0.3 were mottled, most of all in shadow (`8e6b70c6`).
   - The indirect specular rose towards edge-on on a surface too rough to trace (`2c7e0cb8`).
+  - A reflection's history was read at one of two places 0.375 of a traced pixel apart, so it moved under a still
+    camera (`05d3d655`).
+  - The history was held within the mean and deviation of only 3 by 3 traced pixels. That box moved with the noise
+    of each frame, and took the history with it on a mirror and on water (`72fce97b`, now 5 by 5).
+  - A window pane scattered no light from its body. The Cycles pane is 10 % a lit white surface, so at hour 22 in
+    `cabin-lantern` it is a lit grey and Magic's was black: 0.03 of the Cycles pane's light. Lit as a body, it is 0.5
+    to 0.7.
+  - The screen trace took a step as a hit when the step was behind the depth by up to 3 % of the depth, also when
+    the step itself was shorter. A ray from the bottom of the steel ball runs under the ball, behind the ball's own
+    near side, and took that side's dark edge from last frame's picture. Each frame made the edge darker. In
+    `cabin-surfaces-close` at hour 12, the bottom of the ball was 0.10 of the light of the table below it, against
+    0.30 in Cycles. A hit now counts only where the ray crosses the depth within its own step: 0.65.
+- **Causes to check:**
+  - The hold of the history's brightness within 8 times its neighbours' mean also lets the noise of a frame through.
+  - A still surface has a velocity of 0.02 to 0.3 pixel.
+  - A ray's hit read its material averaged over the whole texture, so each reflection showed a textured surface as
+    one flat colour. The reflection trace now records each hit, a pass for each material shader evaluates the hit's
+    own material at its texture coordinates, and a pass lights it. In `cabin-surfaces-close` at hour 12, the steel
+    ball and the water now show the wood grain of the table and of the window frame. The diffuse trace, the probes
+    and the mirror of a pane (`ShadeTranslucent`) still read the average.
+  - A metal that a reflection ray hits took no light from the sun or the local lights, only the probes' light. It
+    now takes its F0 times the direct light. No row proves this yet.
+  - Cycles lights the room from the lantern's emissive globe. Magic lights it only from the point light inside the
+    opaque globe, so the globe and the cap cast a hard shadow on the pane.
+  - A screen trace that reads last frame's lit picture, with the traced hit where the ray leaves the screen,
+    made each point at three angles worse while the traced hit read the averaged material (`59bf6b67`). With the
+    traced hit shaded and lit, the steel ball was still worse: 0.11 to 0.15 became 0.19 to 0.25 in
+    `cabin-surfaces-close` at hour 12. A ray that comes back towards the camera lands on a side that the screen
+    does not show. The screen's light now fades out for such a ray, and the row is within the noise.
 
 ## Distance
 
@@ -446,7 +537,8 @@ The user's rule: light and shadows must not depend on where the camera looks. On
 
 ### Impostors and far geometry
 
-- **Looks like:** foliage that goes flat, black or missing past a distance. The user: "trees are billboard too soon,
+- **Looks like:** foliage that goes flat, black or missing past a distance. Also a small thing close to the camera
+  with a ragged outline and a blurred surface. The user: "trees are billboard too soon,
   billboards tend to have a lot of noise on them and are lit very flat, they tend to have black square artifacts
   flicker on them".
 - **Example:** far trees lose their foliage past about 60 m. The foliage of a fir and an aspen is speckled with pure
@@ -455,8 +547,28 @@ The user's rule: light and shadows must not depend on where the camera looks. On
   view looks across the clearing into the forest, so the switch at about 60 m is in its picture. Read its point
   `far foliage past the impostor switch`, which is 63.7 m away.
 - **Reject rule:** a visible switch from a model to its impostor fails. Black speckles on foliage fail.
-- **Cause proved:** a model turned into its impostor at half the size on screen. Rays then started from an
-  impostor's pixels outside the leaves that the rays see in its place (`7e7e7c42`).
+- **Causes proved:**
+  - A model turned into its impostor at half the size on screen. Rays then started from an impostor's pixels outside
+    the leaves that the rays see in its place (`7e7e7c42`).
+  - A full visible list raised the impostor's radius on screen up to 256 pixels. The polished steel ball, 1.1 m from
+    the camera, drew as a magnified impostor, with a velocity of 1 to 4 pixels on a still view (`7c1cae60`).
+  - The firs were thin and pale far away. Magic culled the back faces of the needle cards, and Cycles draws both
+    faces. At `cabin-trees` at 12 the colour of `far foliage past the impostor switch` was 0.77 from the reference,
+    because the point showed the sky through the culled faces. A material with `isDoubleSided` now draws both faces,
+    turns the normal of a back face to the camera, and a ray that lands on a back face lands on a surface. The colour
+    went to 0.30 (`052ba8ef`).
+  - A flipped back face kept its lift towards its vertex normals, which are behind the face after the flip. Its rays
+    started on the other side of the card. A flipped back face now has no lift, and the impostor bake keeps back
+    faces for a double-sided material (`c522d0f3`).
+- **Cause to check:** single-pixel holes of full sky light, in rows, on the far firs. At
+  `far foliage past the impostor switch`, 6, 4 and 3 of the 25 pixels of the patch show the sky (about 4,000 against
+  100 to 150 for the needles) at the three camera angles. The patch light moves 0.26 to 0.34 between the angles. Each
+  frame of one angle holds the same holes, so the jitter does not average them. The row did not change with the
+  reflections off, the traced shadows off, no impostor switch (`ImpostorPixels 0` and `ImpostorDistance 0`) or a
+  finer cluster error (0.25 pixels). Not yet tested: the diffuse trace, the probes at a hit, a visible list that is
+  not full (a full list raises the cluster error up to 4 times), and the temporal resolve.
+- **Test for a thing close up:** `set Rendering.ImpostorPixels 0` turns the size test off. If the fault goes, the
+  thing drew as its impostor.
 
 ## Content and the engine
 
@@ -526,6 +638,12 @@ These faults are in the tools, not in the renderer. Each one made earlier number
   and set each lamp to the intensity of the limits file before a still picture, as the tests do.
 - **A picture taken before the exposure settled:** after a change of the hour, the exposure needs 15 to 16 seconds.
   At hour 22 it still wanders by 2.5 % after that, so a row of that hour cannot read a change smaller than 2.5 %.
+- **A still frame before the anti-aliasing:** `screenshot --hdr` reads the lit light before the TAA resolve. Each
+  frame holds the camera's jitter, so each edge and each thin leaf moves from frame to frame. In `cabin-trees` at 12,
+  the far treeline read a flicker of 0.29 in the HDR frames and 0.03 in the LDR frames of the same run, which come
+  after the resolve. The cabin's straight edges read 0.3 in the HDR frames too. With no impostors, the LDR treeline
+  read 0.029. The `flicker` row reads the HDR frames, so it measures the jitter and not the picture.
+  A frame that takes an HDR screenshot now has no jitter.
 - **A count that is not steady:** the fireflies in one frame doubled between two runs of the same code, from 59 to
   119 in a million. A row whose spread over two runs is larger than the change you look for proves nothing. Run
   `-Repeat` and read the spread before you trust a row.

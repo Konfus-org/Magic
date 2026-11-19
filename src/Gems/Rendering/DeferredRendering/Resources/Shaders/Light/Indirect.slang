@@ -112,8 +112,9 @@ float GetSurfaceWeight(FrameConstants frame, uint2 at, float depth, float3 relat
 // at a point of its footprint from 0 to 1 across and down, was traced, something drawn there no rougher than a
 // roughness, times how much it lies on the pixel's surface, as a part of the most any tap does, so an edge takes in
 // little of what lies off it, a pixel with none of its own surface around reads the tap nearest to it rather than a
-// mean of all, and none where it wasn't traced. Its coverage falls as far as the tap that lies most on its surface lies
-// off it.
+// mean of all, and none where it wasn't traced. Its coverage is the share of the taps on its surface that were traced,
+// so a tap on another surface behind a silhouette, traced or not, does not lower it. It also falls as far as the tap
+// that lies most on its surface lies off it.
 public TracedTaps GetTracedTaps(
     FrameConstants frame,
     uint2 size,
@@ -137,23 +138,29 @@ public TracedTaps GetTracedTaps(
     float4 scores = float4(-1e30);
     float best = -1e30;
     float bestSurface = -1e30;
+    float onSurface = 0.0;
     for (uint i = 0u; i < 4u; i++)
     {
         uint2 traced = GetPicturePixel(frame, taps.GetTexel(i), size, at);
         float depth = depthTexture.Load(traced, 0u).x;
-        if (depth == 0.0 || surfaceTexture.Load(traced, 0u).x > roughest || bilinear[i] <= 0.0)
+        if (depth == 0.0 || bilinear[i] <= 0.0)
             continue;
 
         float surface = GetSurfaceScore(frame, traced, depth, relative, normal, viewDepth);
+        float share = bilinear[i] * exp(surface);
+        onSurface += share;
+        if (surfaceTexture.Load(traced, 0u).x > roughest)
+            continue;
+
         scores[i] = surface + log(bilinear[i]);
         best = max(best, scores[i]);
         bestSurface = max(bestSurface, surface);
-        taps.coverage += bilinear[i];
+        taps.coverage += share;
     }
 
     // A pixel that no tap lies on, such as a thin side seen edge-on, counts as not traced, so it takes the fallback's
     // light rather than another surface's.
-    taps.coverage *= exp(bestSurface);
+    taps.coverage = onSurface > 0.0 ? taps.coverage / onSurface * exp(bestSurface) : 0.0;
 
     for (uint i = 0u; i < 4u; i++)
     {
