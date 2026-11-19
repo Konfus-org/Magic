@@ -198,6 +198,27 @@ A session is done when it isn't running, its work has merged or its question was
 on the user. Delete the side sessions you started once they're done, with the user's approval of each (the
 tidy-worktrees skill). A coordinator closes its own workers without a new approval (the parallelize skill).
 
+### Status
+
+Each agent posts its status, so that the user sees what waits on them and how much work is left. Post it in a
+`text` code block, as in this example. Put no other text in the block.
+
+```text
+[########------------]  40%  2/5 steps
+Waiting on you: nothing
+Doing: add the Status section
+Next: update the parallelize skill
+```
+
+- **The bar:** 20 cells, `#` for done and `-` for not done. Then the percent and the count.
+- **The count:** the steps of the agent's task list that are done, of all its steps. A coordinator counts the
+  slices that merged into the root or answered, of all the approved slices (the parallelize skill).
+- **The first line under the bar** is always `Waiting on you:`. Write `nothing` when nothing waits on the user.
+- **When:** each time a step finishes, at least one time in about ten minutes of work, and at the end of each turn
+  that leaves work open.
+- **Closing lines:** the status comes before the closing lines that a skill requires, such as the `VERDICT:` lines
+  of QA and the `SLICE:` line of a worker. Those lines stay last.
+
 ### Commits
 
 - The subject starts with `type: `, as in `fix: `, which the repository's git hook writes from the branch's type and

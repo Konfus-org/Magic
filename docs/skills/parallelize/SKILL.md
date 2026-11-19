@@ -163,10 +163,12 @@ flowchart TD
    Resume the first coder with "Your profiling turn starts now." The turn ends when that coder stops. If it stopped
    without a release, run the command that releases a profiling turn, in its worktree.
 7. **Keep the user informed.** Post the status each time a worker stops, and each time something else changes. It
-   is the last text of the turn. Do not write other text about the turn: the status says it. Always use this shape.
-   Send a notification where the tool can.
+   is the last text of the turn. Do not write other text about the turn: the status says it. Always use this shape,
+   in a `text` code block, with the bar and the rules of Status in PROJECT.md. Send a notification where the tool
+   can.
 
    ```text
+   [#########-----------]  44%  4/9 slices merged or answered
    Waiting on you: QA's issues (2 more in the queue)
    Reported: search: done, merged into the root - added the index and the query box
    In flight (2): export (profiling), undo (building)
@@ -174,7 +176,8 @@ flowchart TD
    Next: history, once undo merges
    ```
 
-   - The first line is always `Waiting on you:`. Write `nothing` when the queue for the user is empty.
+   - `Waiting on you:` is `nothing` when the queue for the user is empty.
+   - Workers post the shape of Status in PROJECT.md, before their `SLICE:` line. The `SLICE:` line stays last.
    - `Reported:` has one line for each worker that stopped in this turn: its slice, its state, what you did with
      it, and its `NOTE`.
 

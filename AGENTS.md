@@ -36,6 +36,8 @@ These rules apply to each task, also when no skill is in use. The detail of each
   commit in the main checkout. The final merge is the one exception (Worktrees).
 - **One merge at the end.** Nothing merges into the main checkout's branch before the cleanup branch pass, a QA
   `PASS`, the stamp and the user's yes (the finish skill, Branches and Merges). Never push.
+- **Post the status.** Post it in a code block with a progress bar, when a step finishes and at the end of each
+  turn that leaves work open (Status).
 - **Start Magic only with the scripts** (Commands). Give each command a time limit (the timeouts skill).
 - **Commits:** the subject is `type: subject`, with no scope. No co-author lines, and nothing that hints the work was
   generated (Commits).
