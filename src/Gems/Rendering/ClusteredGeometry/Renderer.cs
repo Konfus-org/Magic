@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using Magic.Assets;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
@@ -138,6 +139,31 @@ public sealed class Renderer
         Result recorded = _passes.Record(frame, graph, gpu, input.Pools, _settings);
         if (!recorded.Ok)
             Fail(frame, RenderFailure.Resource, recorded.Error);
+    }
+
+    /// <summary>
+    /// Starts to read the clusters of each model that <paramref name="entities"/> draw, so that they load while the
+    /// world fades to the loading screen, before the view's model table holds the models.
+    /// </summary>
+    /// <remarks>
+    /// The entities are gone through on a worker, so no frame of the fade waits for them. The reads start on the render
+    /// thread, whose rows these are.
+    /// </remarks>
+    public async Task OnDomainReadAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel)
+    {
+        ImmutableArray<Handle<Model>> models = await Task.Run(
+                () =>
+                    entities
+                        .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
+                        .Select(renderer => renderer.Model)
+                        .Where(model => model != Handle<Model>.None)
+                        .Distinct()
+                        .ToImmutableArray(),
+                cancel
+            )
+            .ConfigureAwait(false);
+        await _threads.Enter(EngineThread.Render);
+        _resources.Start(models);
     }
 
     /// <summary>

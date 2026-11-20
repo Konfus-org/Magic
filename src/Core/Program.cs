@@ -67,6 +67,7 @@ internal static class Program
 
         // The log of this process goes to a file of its own beside Magic, from here to the exit.
         using Subscription logFile = LogFile.Start(new FileSystem());
+        using IDisposable loadRecording = MetricsLog.RecordLoads();
         int exitCode = Run(commandLine);
         Log.Flush();
 
@@ -124,7 +125,7 @@ internal static class Program
         Threads threads = new();
         Caches caches = new(files, app);
         using AssetManager assets = new(files, caches, events, app);
-        using World world = new(assets, files, events, threads, app);
+        using World world = new(assets, events, threads, app);
         Cli cli = new(app, settings, files, events, assets, world);
 
         if (launchCommands is not null)

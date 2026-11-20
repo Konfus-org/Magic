@@ -20,6 +20,12 @@ public interface IFileSystem
     /// <summary>When the file at <paramref name="path"/> was last written, in UTC.</summary>
     Result<DateTime> GetLastWriteTime(string path);
 
+    /// <summary>
+    /// The size in bytes and the last write time, in UTC ticks, of the file at <paramref name="path"/>: what changes
+    /// when its contents do.
+    /// </summary>
+    Result<(long Length, long Ticks)> GetStamp(string path);
+
     /// <summary>Sets when the file at <paramref name="path"/> was last written to now, and leaves what it holds.</summary>
     Result Touch(string path);
 

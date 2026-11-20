@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Assets.Pipeline;
 using Magic.Events;
 using Magic.Files;
 using Magic.Utils;
@@ -113,7 +112,8 @@ public sealed class AssetManagerTests
                 $$"""{ "id": {{missing.Id}}, "type": "Shader" }"""
             );
             ImmutableArray<string> directories = assets.Database.Directories;
-            assets.Reindex(directories, AssetIndex.Create(files, directories, assets.BuiltIn), []);
+            HashSet<string> touched = ["Shaders/Added.slang"];
+            assets.Reindex(directories, assets.ReadIndex(directories, touched), []);
 
             Assert.False(failed.Ok);
             Assert.Equal("// added", ((Shader)(await TakeReloadedAsync(events, missing.Id)).Asset).Text);

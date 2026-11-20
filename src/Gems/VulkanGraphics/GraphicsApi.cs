@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -5,10 +6,12 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Magic.Debugging;
 using Magic.Events;
+using Magic.Files;
 using Magic.Graphics;
 using Magic.Platform;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;
@@ -21,7 +24,7 @@ namespace Magic.VulkanGraphics;
 /// next frame. The first frame begins when the object is made. To begin a frame, it waits for the frame two before,
 /// gets the window's image, and empties the staging ring for what records next.
 /// </remarks>
-public sealed class GraphicsApi : IGraphicsApi, IDisposable
+public sealed class GraphicsApi : IGraphicsApi, IHookIntoDomainLoading, IDisposable
 {
     /// <summary>
     /// How many frames in a row a named resource may go unasked for before it is destroyed.
@@ -38,6 +41,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     private readonly VulkanDevice _device;
 
     private readonly VulkanHeap _heap;
+
+    private readonly VulkanPipelineCache _pipelineCache;
 
     private readonly VulkanResources _resources;
 
@@ -98,6 +103,7 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         App app,
         Threads threads,
         IShaderCompiler compiler,
+        Caches caches,
         IWindow? window = null
     )
     {
@@ -133,7 +139,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             "Device memory the GPU has for the resources."
         );
         _heap = new VulkanHeap(_device.Api, _device.Features.HasRayQuery);
-        _resources = new VulkanResources(_device, _heap);
+        _pipelineCache = new VulkanPipelineCache(_device, caches, _meter);
+        _resources = new VulkanResources(_device, _heap, _pipelineCache);
         _frames = new VulkanFrames(_device, _resources, _meter);
         _shaders = new VulkanShaders(compiler, _resources, _frames, threads);
         _recorder = new VulkanRecorder(_device, _resources, _heap, _shaders);
@@ -169,8 +176,21 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         _frames.Dispose();
         _resources.Dispose();
         _heap.Dispose();
+        SavePipelineCache();
+        _pipelineCache.Dispose();
         _device.Dispose();
         _meter.Dispose();
+    }
+
+    /// <summary>
+    /// Keeps the pipelines built so far for the next run, in the background, when a world arrived: the first draws of
+    /// what a load brought built their pipelines by then.
+    /// </summary>
+    public Task OnDomainArrivedAsync(CancellationToken cancel)
+    {
+        Task.Run(() => _pipelineCache.SaveAsync(), CancellationToken.None).FireAndForget();
+
+        return Task.CompletedTask;
     }
 
     public TextureDescription GetDescription(GpuTexture texture) =>
@@ -377,6 +397,16 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         else
             Log.Error($"The capture was not written: {captured.Error}");
     }
+
+    /// <summary>
+    /// Keeps the pipelines this run built for the next one.
+    /// </summary>
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD002:Avoid problematic synchronous waits",
+        Justification = "The gem is disposed after the engine's threads ended, so the wait holds up none."
+    )]
+    private void SavePipelineCache() => _pipelineCache.SaveAsync().GetAwaiter().GetResult();
 
     private void Destroy(GpuBuffer buffer)
     {

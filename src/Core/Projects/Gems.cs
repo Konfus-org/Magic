@@ -254,6 +254,9 @@ internal sealed class Gems : IDisposable
                 if (part is IEcs ecs)
                     loaded.Ends.Add(_world.Register(ecs));
 
+                if (part is ISaveSerializer serializer)
+                    loaded.Ends.Add(_world.Register(serializer));
+
                 if (part is IDebugUI debugUI)
                     loaded.Ends.Add(_world.Register(debugUI));
 

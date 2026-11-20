@@ -10,14 +10,19 @@ namespace Magic.CommandLine.Commands;
 /// <c>save settings</c>: saves the settings that differ from their defaults for this user and project.
 /// </summary>
 /// <remarks>
-/// The project opens with them from then on.
+/// The project opens with them from then on. The command is the subcommand of <c>save</c>, which a gem can give an
+/// argument for the saves of the game.
 /// </remarks>
 internal static class SaveSettingsCommand
 {
     public static Command Create(Settings settings)
     {
-        Command save = new("settings", "Saves the settings that differ from their defaults, for this user and project");
-        save.SetAction(_ => SaveSettingsAsync().FireAndForget());
+        Command settingsCommand = new(
+            "settings",
+            "Saves the settings that differ from their defaults, for this user and project"
+        );
+        settingsCommand.SetAction(_ => SaveSettingsAsync().FireAndForget());
+        Command save = new("save", "Saves the settings") { settingsCommand };
 
         return save;
 

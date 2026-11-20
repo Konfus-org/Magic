@@ -13,6 +13,8 @@ line. A typed option can omit the `--` at its start.
 
 - `open <path>` opens a project and `headless false` shows a window. Each of them restarts the run.
 - `exit` ends the run.
+- `save <name>` saves the game, and `load <name>` puts the game back as that save holds it. The save gem adds them
+  ([SaveFiles](GEMS.md#savefiles)). A project that does not list the gem has neither.
 - `capture [--frames <n>]` captures the next frame, or the next `n` frames, with RenderDoc into `Captures/` beside
   Magic, when RenderDoc started Magic ([RenderDoc capture](DEBUGGING.md#renderdoc-capture)).
 
@@ -38,8 +40,8 @@ line. A typed option can omit the `--` at its start.
 - At launch, `--configure` sets settings over the saved values, as in
   `--configure Window.Mode=windowed Rendering.Resolution="1280 720"`.
 
-Magic keeps the saved settings and the saves of a project under the local application data folder, in
-`Magic/<project>/Settings/` and `Magic/<project>/Saves/`.
+Magic keeps the saved settings of a project under the local application data folder, in `Magic/<project>/Settings/`.
+The save gem keeps the saves in `Magic/<project>/Saves/`.
 
 A part of a gem can give its properties a path. These values are state of the run, and Magic does not save them.
 

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using Magic.Utils;
+using Microsoft.Win32.SafeHandles;
 
 namespace Magic.Files;
 
@@ -29,6 +30,16 @@ internal sealed class FileSystem : IFileSystem
                 ? File.GetLastWriteTimeUtc(path)
                 : throw new FileNotFoundException($"{path} does not exist.", path)
         );
+
+    public Result<(long Length, long Ticks)> GetStamp(string path) =>
+        Run(() =>
+        {
+            FileInfo info = new(path);
+
+            return info.Exists
+                ? (info.Length, info.LastWriteTimeUtc.Ticks)
+                : throw new FileNotFoundException($"{path} does not exist.", path);
+        });
 
     public Result Touch(string path) => Run(() => File.SetLastWriteTimeUtc(path, DateTime.UtcNow));
 
@@ -59,10 +70,43 @@ internal sealed class FileSystem : IFileSystem
     public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel) =>
         RunAsync(() => File.ReadAllTextAsync(path, cancel));
 
-    public Result<byte[]> ReadBytes(string path) => Run(() => File.ReadAllBytes(path));
+    public Result<byte[]> ReadBytes(string path) =>
+        Run(() =>
+        {
+            using SafeFileHandle handle = OpenForRead(path, FileOptions.None);
+            byte[] bytes = new byte[ReadableLength(handle)];
+            int read = 0;
+            while (read < bytes.Length)
+            {
+                int count = RandomAccess.Read(handle, bytes.AsSpan(read), read);
+                if (count == 0)
+                    break;
+
+                read += count;
+            }
+
+            return read == bytes.Length ? bytes : bytes[..read];
+        });
 
     public Task<Result<byte[]>> ReadBytesAsync(string path, CancellationToken cancel) =>
-        RunAsync(() => File.ReadAllBytesAsync(path, cancel));
+        RunAsync(async () =>
+        {
+            using SafeFileHandle handle = OpenForRead(path, FileOptions.Asynchronous);
+            byte[] bytes = new byte[ReadableLength(handle)];
+            int read = 0;
+            while (read < bytes.Length)
+            {
+                int count = await RandomAccess
+                    .ReadAsync(handle, bytes.AsMemory(read), read, cancel)
+                    .ConfigureAwait(false);
+                if (count == 0)
+                    break;
+
+                read += count;
+            }
+
+            return read == bytes.Length ? bytes : bytes[..read];
+        });
 
     public Result Write(string path, string contents) => Run(() => File.WriteAllText(path, contents));
 
@@ -75,7 +119,7 @@ internal sealed class FileSystem : IFileSystem
                 Directory.CreateDirectory(folder);
 
             await File.WriteAllBytesAsync(temporary, bytes, cancel).ConfigureAwait(false);
-            File.Move(temporary, path, overwrite: true);
+            Replace(temporary, path);
 
             return Result.Success();
         }
@@ -111,7 +155,7 @@ internal sealed class FileSystem : IFileSystem
             FileSystemWatcher watcher = new(path, filter)
             {
                 IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
             };
             watcher.Created += (_, e) => touched(e.FullPath);
             watcher.Changed += (_, e) => touched(e.FullPath);
@@ -173,4 +217,44 @@ internal sealed class FileSystem : IFileSystem
     /// </summary>
     private static bool IsRefusal(Exception ex) =>
         ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException;
+
+    /// <summary>
+    /// Opens <paramref name="path"/> to read, so that a replace of the file does not collide with the read: Windows
+    /// refuses a replace of a file that a handle holds open, unless the handle shares delete.
+    /// </summary>
+    private static SafeFileHandle OpenForRead(string path, FileOptions options) =>
+        File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, options);
+
+    private static int ReadableLength(SafeFileHandle handle)
+    {
+        long length = RandomAccess.GetLength(handle);
+        if (length > Array.MaxLength)
+        {
+            throw new IOException(
+                $"The file is {length} bytes, more than the {Array.MaxLength} bytes that one array holds."
+            );
+        }
+
+        return (int)length;
+    }
+
+    /// <summary>
+    /// Puts <paramref name="from"/> in place of <paramref name="to"/>, in one step.
+    /// </summary>
+    /// <remarks>
+    /// A move over a file refuses on Windows when any handle holds the file, also one that shares delete. A replace
+    /// works when each reader shares delete (<see cref="OpenForRead"/>). It needs the file to exist, so a move makes
+    /// the first one.
+    /// </remarks>
+    private static void Replace(string from, string to)
+    {
+        try
+        {
+            File.Replace(from, to, destinationBackupFileName: null);
+        }
+        catch (FileNotFoundException) when (File.Exists(from))
+        {
+            File.Move(from, to, overwrite: true);
+        }
+    }
 }

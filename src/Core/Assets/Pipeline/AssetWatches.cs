@@ -90,7 +90,7 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
             }
 
             ImmutableArray<string> directories = assets.Database.Directories;
-            bool isTaken = assets.Reindex(directories, AssetIndex.Create(files, directories, assets.BuiltIn), touched);
+            bool isTaken = assets.Reindex(directories, assets.ReadIndex(directories, touched), touched);
             lock (_gate)
             {
                 // A directory was added during the read, so read again with it.

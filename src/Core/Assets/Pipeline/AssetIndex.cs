@@ -52,14 +52,15 @@ internal sealed record AssetIndex
     public required FrozenDictionary<string, IndexedFile> BuiltIn { get; init; }
 
     /// <summary>
-    /// What <paramref name="directories"/> hold, read one by one; when two hold the same path, the first wins.
+    /// What <paramref name="directories"/> hold, as <paramref name="scans"/> has them; when two hold the same path, the
+    /// first wins.
     /// </summary>
     /// <remarks>
     /// <paramref name="builtIn"/> is the directory whose files are built in. A file with an id that another file has
     /// already is an error and gives no asset, unless it is at the same path in a later directory, which the first
     /// overrides.
     /// </remarks>
-    public static AssetIndex Create(IFileSystem files, ImmutableArray<string> directories, string builtIn)
+    public static AssetIndex Create(AssetScans scans, ImmutableArray<string> directories, string builtIn)
     {
         Dictionary<ulong, IndexedFile> byId = [];
         Dictionary<string, IndexedFile> byPath = new(StringComparer.OrdinalIgnoreCase);
@@ -68,7 +69,7 @@ internal sealed record AssetIndex
         foreach (string directory in directories)
         {
             bool isBuiltIn = string.Equals(directory, builtIn, StringComparison.OrdinalIgnoreCase);
-            foreach (IndexedFile indexed in ReadDirectory(files, directory))
+            foreach (IndexedFile indexed in scans.Get(directory))
             {
                 string path = indexed.Path;
 
@@ -219,58 +220,10 @@ internal sealed record AssetIndex
             : null;
 
     /// <summary>
-    /// <paramref name="path"/> without its extensions: <c>Materials/Default</c> for <c>Materials/Default.mat</c>.
-    /// </summary>
-    private static string WithoutExtension(string path)
-    {
-        int name = path.LastIndexOf('/') + 1;
-        int dot = path.IndexOf('.', name);
-
-        return dot < 0 ? path : path[..dot];
-    }
-
-    /// <summary>
-    /// Every file with a sidecar under <paramref name="directory"/>, by its path from it. A sidecar without its file is
-    /// warned about, and a broken one is an error and gives no asset.
-    /// </summary>
-    private static List<IndexedFile> ReadDirectory(IFileSystem files, string directory)
-    {
-        List<IndexedFile> found = [];
-        Result<string[]> sidecars = files.EnumerateFiles(directory, "*" + Sidecar, recursive: true);
-        if (!sidecars.Ok)
-        {
-            Log.Error($"The assets under {directory} could not be listed: {sidecars.Error}");
-            return found;
-        }
-
-        foreach (string sidecar in sidecars.Value)
-        {
-            string file = sidecar[..^Sidecar.Length];
-            string path = file[(directory.Length + 1)..].Replace('\\', '/');
-            if (!files.FileExists(file))
-            {
-                Log.Warn($"{path}{Sidecar} has no {path} beside it.");
-                continue;
-            }
-
-            Result<IndexedFile> read = ReadSidecar(files, sidecar, path, file);
-            if (!read.Ok)
-            {
-                Log.Error($"{path}{Sidecar} is not a sidecar, so {path} is not an asset: {read.Error}");
-                continue;
-            }
-
-            found.Add(read.Value);
-        }
-
-        return found;
-    }
-
-    /// <summary>
     /// The asset the sidecar at <paramref name="sidecar"/> makes <paramref name="file"/>, at <paramref name="path"/>:
     /// its id, its type's name, and the rest of it, the import settings its importer reads.
     /// </summary>
-    private static Result<IndexedFile> ReadSidecar(IFileSystem files, string sidecar, string path, string file)
+    internal static Result<IndexedFile> ReadSidecar(IFileSystem files, string sidecar, string path, string file)
     {
         Result<byte[]> bytes = files.ReadBytes(sidecar);
         if (!bytes.Ok)
@@ -304,6 +257,17 @@ internal sealed record AssetIndex
         return settings.Ok
             ? Result.Success(new IndexedFile(value, typeName, path, file, settings.Value))
             : Result.Failure(settings.Error);
+    }
+
+    /// <summary>
+    /// <paramref name="path"/> without its extensions: <c>Materials/Default</c> for <c>Materials/Default.mat</c>.
+    /// </summary>
+    private static string WithoutExtension(string path)
+    {
+        int name = path.LastIndexOf('/') + 1;
+        int dot = path.IndexOf('.', name);
+
+        return dot < 0 ? path : path[..dot];
     }
 
     /// <summary>

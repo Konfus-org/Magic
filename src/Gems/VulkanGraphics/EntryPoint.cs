@@ -1,5 +1,6 @@
 using Magic.CommandLine;
 using Magic.Events;
+using Magic.Files;
 using Magic.Graphics;
 using Magic.Platform;
 using Magic.Projects;
@@ -19,11 +20,12 @@ public sealed class EntryPoint : IGem, IDisposable
         Threads threads,
         IShaderCompiler compiler,
         ConsoleCommands commands,
+        Caches caches,
         IWindow? window = null
     )
     {
         Settings = settings;
-        GraphicsApi = new(settings, app, threads, compiler, window);
+        GraphicsApi = new(settings, app, threads, compiler, caches, window);
         commands.RegisterQuery(
             "gpu",
             "Prints the GPU that draws: its name, its kind, its driver, the API, its memory and whether the API validates",

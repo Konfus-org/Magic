@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -84,6 +85,113 @@ public sealed class Ecs : IEcs, IDisposable
         Stamp(created);
 
         return Unsafe.BitCast<ArchEntity, Entity>(created);
+    }
+
+    public void CreateMany(ReadOnlySpan<ImmutableArray<IComponent>> entities, Span<Entity> created)
+    {
+        ThrowIfCannotChange();
+        if (created.Length != entities.Length)
+            throw new ArgumentException("There is one slot in created for each entity.", nameof(created));
+
+        // Entities with the same components in the same order are one group; the same set in another order is another
+        // group, that Arch puts in the same archetype.
+        Dictionary<long, List<Group>> groups = [];
+        List<Group> order = [];
+        for (int i = 0; i < entities.Length; i++)
+        {
+            ImmutableArray<IComponent> components = entities[i];
+            long key = 17;
+            foreach (IComponent component in components)
+            {
+                key = unchecked((key * 31) + GetComponentType(component.GetType()).Id + 1);
+            }
+
+            Group? found = null;
+            if (groups.TryGetValue(key, out List<Group>? candidates))
+            {
+                foreach (Group candidate in candidates)
+                {
+                    if (candidate.Matches(components))
+                    {
+                        found = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (found is null)
+            {
+                ComponentType[] types = new ComponentType[components.Length];
+                Type[] clrTypes = new Type[components.Length];
+                for (int c = 0; c < types.Length; c++)
+                {
+                    clrTypes[c] = components[c].GetType();
+                    types[c] = GetComponentType(clrTypes[c]);
+                }
+
+                found = new Group(types, clrTypes);
+                if (candidates is null)
+                    groups[key] = candidates = [];
+
+                candidates.Add(found);
+                order.Add(found);
+            }
+
+            found.Members.Add(i);
+        }
+
+        foreach (Group group in order)
+        {
+            Archetype? archetype = null;
+            int lastChunk = -1;
+            foreach (int member in group.Members)
+            {
+                ArchEntity entity = _world.Create(group.Types);
+                EntityData data = _world.GetEntityData(entity);
+                archetype ??= data.Archetype;
+                if (data.Slot.ChunkIndex != lastChunk)
+                {
+                    lastChunk = data.Slot.ChunkIndex;
+                    Stamp(archetype, lastChunk);
+                }
+
+                Chunk chunk = archetype.GetChunk(data.Slot.ChunkIndex);
+                ImmutableArray<IComponent> components = entities[member];
+                for (int c = 0; c < components.Length; c++)
+                {
+                    Array column = chunk.GetArray(group.Types[c]);
+                    ColumnWriter.Get(group.ClrTypes[c]).Write(column, data.Slot.Index, components[c]);
+                }
+
+                created[member] = Unsafe.BitCast<ArchEntity, Entity>(entity);
+            }
+        }
+    }
+
+    public void DestroyMany(ReadOnlySpan<Entity> entities)
+    {
+        ThrowIfCannotChange();
+
+        // Destroying moves the last entity of an archetype into the freed place, within the archetype, so every
+        // chunk of each archetype that loses an entity is marked written once, here.
+        HashSet<Archetype> stamped = [];
+        foreach (Entity entity in entities)
+        {
+            ArchEntity arch = Unsafe.BitCast<Entity, ArchEntity>(entity);
+            if (!_world.IsAlive(arch))
+                continue;
+
+            Archetype archetype = _world.GetEntityData(arch).Archetype;
+            if (stamped.Add(archetype))
+            {
+                for (int index = 0; index < archetype.ChunkCount; index++)
+                {
+                    Stamp(archetype, index);
+                }
+            }
+
+            _world.Destroy(arch);
+        }
     }
 
     public IComponent[] GetComponents(Entity entity) =>
@@ -490,6 +598,67 @@ public sealed class Ecs : IEcs, IDisposable
             _index = -1;
             _isWalking = true;
             ecs._openLoops++;
+        }
+    }
+
+    /// <summary>
+    /// The entities of one bulk create that have the same components.
+    /// </summary>
+    private sealed class Group(ComponentType[] types, Type[] clrTypes)
+    {
+        public ComponentType[] Types { get; } = types;
+
+        public Type[] ClrTypes { get; } = clrTypes;
+
+        /// <summary>
+        /// The indexes of the entities in the call's input.
+        /// </summary>
+        public List<int> Members { get; } = [];
+
+        public bool Matches(ImmutableArray<IComponent> components)
+        {
+            if (components.Length != ClrTypes.Length)
+                return false;
+
+            for (int i = 0; i < ClrTypes.Length; i++)
+            {
+                if (components[i].GetType() != ClrTypes[i])
+                    return false;
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Writes a boxed component into a column of its type.
+    /// </summary>
+    private abstract class ColumnWriter
+    {
+        private static readonly Dictionary<Type, ColumnWriter> _writers = [];
+
+        public static ColumnWriter Get(Type type)
+        {
+            if (!_writers.TryGetValue(type, out ColumnWriter? writer))
+            {
+                writer = Create(type);
+                _writers[type] = writer;
+            }
+
+            return writer;
+        }
+
+        public abstract void Write(Array column, int index, IComponent value);
+
+        private static ColumnWriter Create(Type type) =>
+            Activator.CreateInstance(typeof(Typed<>).MakeGenericType(type)) as ColumnWriter
+            ?? throw new InvalidOperationException($"No column writer for {type.Name}.");
+
+        private sealed class Typed<T> : ColumnWriter
+            where T : unmanaged, IComponent
+        {
+            public override void Write(Array column, int index, IComponent value) =>
+                Unsafe.As<T[]>(column)[index] = (T)value;
         }
     }
 }

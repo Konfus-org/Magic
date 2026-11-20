@@ -6,7 +6,7 @@ namespace Magic.Files;
 /// Where what is the user's own is kept, under their local application data: a folder per project, with its
 /// <c>Settings</c> and its <c>Saves</c>.
 /// </summary>
-internal static class UserFolders
+public static class UserFolders
 {
     /// <summary>
     /// <c>Magic/&lt;project&gt;</c> under the user's local application data.

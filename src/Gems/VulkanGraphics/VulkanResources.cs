@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using Magic.Assets;
 using Magic.Debugging;
@@ -181,7 +182,8 @@ internal sealed class Slots<T>(uint capacity)
 /// A freed resource goes to the frame's trash, and is destroyed after the frames in flight are done with it. Its id
 /// waits as long.
 /// </remarks>
-internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap heap) : IDisposable
+internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap heap, VulkanPipelineCache pipelineCache)
+    : IDisposable
 {
     private const float LodClampNone = 1000;
 
@@ -452,7 +454,9 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             layout = heap.PipelineLayout,
         };
         VkPipeline pipeline;
-        VkResult result = device.Api.vkCreateComputePipelines(VkPipelineCache.Null, 1, &createInfo, &pipeline);
+        long buildStart = Stopwatch.GetTimestamp();
+        VkResult result = device.Api.vkCreateComputePipelines(pipelineCache.Handle, 1, &createInfo, &pipeline);
+        pipelineCache.RecordBuild(buildStart, "compute");
         device.Api.vkDestroyShaderModule(module.Value);
         if (result != VkResult.Success)
             return Result.Failure($"Vulkan could not build the compute pipeline {description.Name}: {result}.");
@@ -520,7 +524,9 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             layout = layout,
         };
         VkPipeline pipeline;
-        VkResult result = device.Api.vkCreateComputePipelines(VkPipelineCache.Null, 1, &createInfo, &pipeline);
+        long buildStart = Stopwatch.GetTimestamp();
+        VkResult result = device.Api.vkCreateComputePipelines(pipelineCache.Handle, 1, &createInfo, &pipeline);
+        pipelineCache.RecordBuild(buildStart, "bound");
         device.Api.vkDestroyShaderModule(module.Value);
         VulkanPipeline made = new()
         {
@@ -625,7 +631,9 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             layout = heap.PipelineLayout,
         };
         VkPipeline pipeline;
-        VkResult result = device.Api.vkCreateGraphicsPipelines(VkPipelineCache.Null, 1, &createInfo, &pipeline);
+        long buildStart = Stopwatch.GetTimestamp();
+        VkResult result = device.Api.vkCreateGraphicsPipelines(pipelineCache.Handle, 1, &createInfo, &pipeline);
+        pipelineCache.RecordBuild(buildStart, "graphics");
         device.Api.vkDestroyShaderModule(vertex.Value);
         device.Api.vkDestroyShaderModule(pixel.Value);
         if (result != VkResult.Success)

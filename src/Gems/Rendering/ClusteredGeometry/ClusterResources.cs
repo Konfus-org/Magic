@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
@@ -48,6 +49,12 @@ internal sealed class ClusterResources(
     /// One whose copies were not staged waits for the next frame.
     /// </remarks>
     private readonly List<(int Index, ModelPlace Place, ModelClusters Made)> _placedModels = [];
+
+    /// <summary>
+    /// The reads of the clusters of the models that a domain draws, started before a row asked for them, by the model's
+    /// id. A row that asks for one of these models takes its read.
+    /// </summary>
+    private readonly Dictionary<ulong, Task<Result<ModelClusters>>> _started = [];
 
     // The impostor table's rows; row 0 is none, so it is taken from the start.
     private readonly FreeList _impostorRows = new(ImpostorCapacity, 1);
@@ -199,6 +206,30 @@ internal sealed class ClusterResources(
     }
 
     /// <summary>
+    /// Starts to read the clusters of <paramref name="models"/>, before the view's model table holds them, so a row that
+    /// asks for one of them later takes the read in progress or done.
+    /// </summary>
+    /// <remarks>
+    /// A model that a row holds already is not read. The reads that an earlier call started and that no row took are
+    /// dropped, so a model that changed since is read again.
+    /// </remarks>
+    public void Start(ImmutableArray<Handle<Model>> models)
+    {
+        foreach (Task<Result<ModelClusters>> untaken in _started.Values)
+        {
+            untaken.FireAndForget();
+        }
+
+        _started.Clear();
+        HashSet<ulong> held = [.. _rows.Select(row => row.Place.Model.Id)];
+        foreach (Handle<Model> model in models)
+        {
+            if (!held.Contains(model.Id))
+                _started.TryAdd(model.Id, ReadAsync(model));
+        }
+    }
+
+    /// <summary>
     /// Describes an impostor atlas of <see cref="ImpostorBuilder.Size"/> texels across and
     /// <see cref="ImpostorBuilder.Height"/> down, in <paramref name="format"/>.
     /// </summary>
@@ -230,31 +261,37 @@ internal sealed class ClusterResources(
     private string GetName(ModelPlace place) => assets.GetPath(place.Model) ?? $"model {place.Model.Id}";
 
     /// <summary>
-    /// Reads the model's clusters, as its preprocessor made them, on a worker, for the next <see cref="Prepare"/> to
-    /// settle.
+    /// Reads the model's clusters for the row, or takes the read that <see cref="Start"/> started, for the next
+    /// <see cref="Prepare"/> to settle.
+    /// </summary>
+    private async Task LoadAsync(int index, ModelPlace place)
+    {
+        Task<Result<ModelClusters>> reading = _started.Remove(place.Model.Id, out Task<Result<ModelClusters>>? started)
+            ? started
+            : ReadAsync(place.Model);
+        Result<ModelClusters> made = await reading.ConfigureAwait(false);
+        await threads.Enter(EngineThread.Render);
+        _madeModels.Add((index, place, made));
+    }
+
+    /// <summary>
+    /// Reads the model's clusters, as its preprocessor made them, on a worker.
     /// </summary>
     /// <remarks>
     /// The failure cube's clusters are made from memory.
     /// </remarks>
-    private async Task LoadAsync(int index, ModelPlace place)
+    private async Task<Result<ModelClusters>> ReadAsync(Handle<Model> model)
     {
-        Result<ModelClusters> made;
         try
         {
-            made =
-                place.Model == FailureCube.Handle
-                    ? Result.Success(await Task.Run(() => clusters.Preprocess(FailureCube.Model)).ConfigureAwait(false))
-                    : await assets
-                        .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
-                        .ConfigureAwait(false);
+            return model == FailureCube.Handle
+                ? Result.Success(await Task.Run(() => clusters.Preprocess(FailureCube.Model)).ConfigureAwait(false))
+                : await assets.LoadPreprocessedAsync(model, clusters, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            made = Result.Failure($"making them threw: {ex}");
+            return Result.Failure($"making them threw: {ex}");
         }
-
-        await threads.Enter(EngineThread.Render);
-        _madeModels.Add((index, place, made));
     }
 
     /// <summary>

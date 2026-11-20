@@ -34,7 +34,9 @@ public sealed class ConsoleCommands
     /// </summary>
     private ImmutableDictionary<string, (object Service, Type Type)> _services = [];
 
-    internal ConsoleCommands() { }
+    private readonly CommandQueue _queue;
+
+    internal ConsoleCommands(CommandQueue queue) => _queue = queue;
 
     /// <summary>
     /// Adds <paramref name="command"/> to the console.
@@ -44,6 +46,15 @@ public sealed class ConsoleCommands
     /// runs Magic's.
     /// </remarks>
     public void Register(Command command) => _added.Enqueue(command);
+
+    /// <summary>
+    /// Returns <paramref name="change"/>, a change to the world that a command started, which <c>wait loaded</c> waits
+    /// for.
+    /// </summary>
+    /// <remarks>
+    /// Call it on the game thread, in the action of the command, with the task that the change returned.
+    /// </remarks>
+    public Task<T> ChangeWorldAsync<T>(Task<T> change) => _queue.ChangeWorldAsync(change);
 
     /// <summary>
     /// Adds the subject <paramref name="name"/> to <c>query</c>: <c>query name</c> prints what

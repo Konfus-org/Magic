@@ -1033,31 +1033,47 @@ public sealed class Renderer
         await _threads.Enter(EngineThread.Render);
         EndPreparing();
         _cover.PickColor(sun);
-        Ecs.Components.Renderer[] renderers =
-        [
-            .. entities
-                .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
-                .Where(renderer => renderer.Model != Handle<Model>.None),
-        ];
-        ImmutableArray<Handle<Material>> materials =
-        [
-            .. renderers
-                .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
-                .Where(material => material != Handle<Material>.None)
-                .Distinct(),
-        ];
+        (ImmutableArray<Handle<Model>> models, ImmutableArray<Handle<Material>> materials) = GetDrawn(entities);
         foreach (Handle<Material> material in materials)
         {
             _resources.Get(material);
         }
 
         Preparing preparing = new(
-            [.. renderers.Select(renderer => renderer.Model).Distinct()],
+            models,
             materials,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
         _preparing = preparing;
         await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks for every model and material that <paramref name="entities"/> draw, so that they load while the world fades
+    /// to the loading screen.
+    /// </summary>
+    /// <remarks>
+    /// The entities are gone through on a worker, so no frame of the fade waits for them. The asks are on the render
+    /// thread, whose tables these are. A model asked for here is kept while the domain loads, as
+    /// <see cref="OnDomainLoadingAsync"/> asks for it again each frame.
+    /// </remarks>
+    public async Task OnDomainReadAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel)
+    {
+        (ImmutableArray<Handle<Model>> models, ImmutableArray<Handle<Material>> materials) = await Task.Run(
+                () => GetDrawn(entities),
+                cancel
+            )
+            .ConfigureAwait(false);
+        await _threads.Enter(EngineThread.Render);
+        foreach (Handle<Model> model in models)
+        {
+            _resources.Get(model);
+        }
+
+        foreach (Handle<Material> material in materials)
+        {
+            _resources.Get(material);
+        }
     }
 
     /// <summary>
@@ -1085,6 +1101,30 @@ public sealed class Renderer
         {
             _screenshots.Writer.TryWrite(asked);
         }
+    }
+
+    /// <summary>
+    /// Returns each model and each material that <paramref name="entities"/> draw, once.
+    /// </summary>
+    private static (ImmutableArray<Handle<Model>> Models, ImmutableArray<Handle<Material>> Materials) GetDrawn(
+        ImmutableArray<ImmutableArray<IComponent>> entities
+    )
+    {
+        Ecs.Components.Renderer[] renderers =
+        [
+            .. entities
+                .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
+                .Where(renderer => renderer.Model != Handle<Model>.None),
+        ];
+        ImmutableArray<Handle<Material>> materials =
+        [
+            .. renderers
+                .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
+                .Where(material => material != Handle<Material>.None)
+                .Distinct(),
+        ];
+
+        return ([.. renderers.Select(renderer => renderer.Model).Distinct()], materials);
     }
 
     /// <summary>

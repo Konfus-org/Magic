@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Linq;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 
@@ -26,10 +25,21 @@ public sealed class Prefab : IAsset<Prefab>
     /// </remarks>
     public ImmutableArray<PlacedPart> Place(Transform at)
     {
-        ImmutableArray<PlacedPart>.Builder placed = ImmutableArray.CreateBuilder<PlacedPart>();
+        ImmutableArray<PlacedPart>.Builder placed = ImmutableArray.CreateBuilder<PlacedPart>(Count(Parts));
         AddPlaced(Parts, at, placed);
 
-        return placed.ToImmutable();
+        return placed.MoveToImmutable();
+    }
+
+    private static int Count(ImmutableArray<PrefabPart> parts)
+    {
+        int count = parts.Length;
+        foreach (PrefabPart part in parts)
+        {
+            count += Count(part.Children);
+        }
+
+        return count;
     }
 
     private static void AddPlaced(
@@ -41,10 +51,16 @@ public sealed class Prefab : IAsset<Prefab>
         foreach (PrefabPart part in parts)
         {
             // The part's transform under its parent's, or its parent's place when the part has none.
-            Transform at = part
-                .Components.OfType<Transform>()
-                .Select(local => local.Under(parent))
-                .FirstOrDefault(parent);
+            Transform at = parent;
+            foreach (IComponent component in part.Components)
+            {
+                if (component is Transform local)
+                {
+                    at = local.Under(parent);
+                    break;
+                }
+            }
+
             placed.Add(new PlacedPart(part, at));
             AddPlaced(part.Children, at, placed);
         }

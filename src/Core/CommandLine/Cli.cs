@@ -44,6 +44,7 @@ internal sealed class Cli
     {
         _files = files;
         _queue = new CommandQueue(events);
+        Commands = new ConsoleCommands(_queue);
         _query = QueryCommand.Create(app, settings, files, assets, world, _queue, Commands, _queryOutput);
 
         // The state of the run that Core itself gives a path, each through the few properties that the console shows.
@@ -61,8 +62,7 @@ internal sealed class Cli
                 NewCommand.Create(app, files, assets, _queue),
                 ScreenshotCommand.Create(app, files, events),
                 CaptureCommand.Create(app, files, events),
-                SaveCommand.Create(app, settings, world, _queue),
-                LoadCommand.Create(app, world, _queue),
+                SaveSettingsCommand.Create(settings),
                 BakeCommand.Create(app, assets, _queue),
                 ImportCommand.Create(app, files, assets, _queue),
                 ExportCommand.Create(app, assets, _queue),
@@ -143,7 +143,7 @@ internal sealed class Cli
     /// <summary>
     /// The commands that the gems of the run add, which join the console as each gem registers one.
     /// </summary>
-    public ConsoleCommands Commands { get; } = new();
+    public ConsoleCommands Commands { get; }
 
     /// <summary>
     /// Executes the commands that Magic started with, or returns why they did not run.
@@ -278,6 +278,18 @@ internal sealed class Cli
     {
         while (Commands.TryTake(out Command? command))
         {
+            // A gem's command that has the name of one of Magic's takes its subcommands, as the save gem's save takes
+            // the subcommand settings.
+            Command? same = _cliCommands.Subcommands.FirstOrDefault(own => own.Name == command.Name);
+            if (same is not null)
+            {
+                _cliCommands.Subcommands.Remove(same);
+                foreach (Command own in same.Subcommands.ToArray())
+                {
+                    command.Subcommands.Add(own);
+                }
+            }
+
             _cliCommands.Subcommands.Add(command);
         }
 

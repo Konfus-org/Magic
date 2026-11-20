@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Magic.Ecs;
 
 /// <summary>
@@ -39,6 +41,21 @@ public interface IEcs
     /// Use it for components that are known only at run time, such as from a file or a save. It boxes.
     /// </remarks>
     Entity Create(ReadOnlySpan<IComponent> components);
+
+    /// <summary>
+    /// Creates one entity for each of <paramref name="entities"/>, its components, and writes them to
+    /// <paramref name="created"/> in the same order.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Create(ReadOnlySpan{IComponent})"/> for many entities at once: it groups them by their components
+    /// and creates each group in one step. Use it to load a domain or a save.
+    /// </remarks>
+    void CreateMany(ReadOnlySpan<ImmutableArray<IComponent>> entities, Span<Entity> created);
+
+    /// <summary>
+    /// Destroys each of <paramref name="entities"/> that is alive, as <see cref="Destroy"/> does.
+    /// </summary>
+    void DestroyMany(ReadOnlySpan<Entity> entities);
 
     /// <summary>
     /// Destroys the entity and its components.

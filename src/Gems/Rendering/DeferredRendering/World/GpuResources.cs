@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
@@ -52,6 +53,15 @@ internal sealed class GpuResources(
     private const int MeshCapacity = 1 << 16;
 
     private readonly Dictionary<ulong, TextureEntry> _textures = [];
+
+    /// <summary>
+    /// The ids of the textures whose load started, from an ask or from a worker as its material landed.
+    /// </summary>
+    /// <remarks>
+    /// A worker reads it, so that it starts only the textures of a material that no load started. Forgetting a texture
+    /// drops it.
+    /// </remarks>
+    private readonly ConcurrentDictionary<ulong, byte> _texturesRead = new();
 
     /// <summary>
     /// Each material asked for, by its id, null while it loads, and why not when it did not load.
@@ -399,6 +409,7 @@ internal sealed class GpuResources(
         {
             entry = new TextureEntry();
             _textures[handle.Id] = entry;
+            _texturesRead.TryAdd(handle.Id, 0);
             LoadAsync(handle, entry).FireAndForget();
         }
 
@@ -497,6 +508,7 @@ internal sealed class GpuResources(
     {
         _materials.Remove(id);
         _textures.Remove(id);
+        _texturesRead.TryRemove(id, out _);
         _misfits.Clear();
         if (_layouts.ContainsKey(id))
         {
@@ -708,12 +720,15 @@ internal sealed class GpuResources(
     /// <returns>The layout, or why not, as when it is more than a row holds.</returns>
     private async Task<Result<MaterialLayout>> ReflectLayoutAsync(ShaderTypeArgument type)
     {
-        Result<ImmutableArray<ShaderField>> fields = await shaders
-            .ReflectAsync(type, CancellationToken.None)
-            .ConfigureAwait(false);
-        Result<long> translucent = await shaders
-            .ReflectConstantAsync(type, "Translucent", CancellationToken.None)
-            .ConfigureAwait(false);
+        // Both reflections run at the same time.
+        Task<Result<ImmutableArray<ShaderField>>> reflecting = shaders.ReflectAsync(type, CancellationToken.None);
+        Task<Result<long>> reflectingTranslucent = shaders.ReflectConstantAsync(
+            type,
+            "Translucent",
+            CancellationToken.None
+        );
+        Result<ImmutableArray<ShaderField>> fields = await reflecting.ConfigureAwait(false);
+        Result<long> translucent = await reflectingTranslucent.ConfigureAwait(false);
         if (!fields.Ok)
             return Result.Failure(fields.Error);
 
@@ -760,6 +775,19 @@ internal sealed class GpuResources(
     private async Task LoadAsync(Handle<Material> handle)
     {
         Result<Material> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
+
+        // The textures that it names and that no ask read yet start to load on this worker, so they do not wait for the
+        // render thread. The asks of the render thread below take the same loads.
+        Task<Result<Texture>>[] reading = loaded.Ok
+            ?
+            [
+                .. loaded
+                    .Value.Params.Values.Where(param => param.RenderTexture == Handle<RenderTexture>.None)
+                    .Select(param => param.Texture)
+                    .Where(texture => texture != Handle<Texture>.None && _texturesRead.TryAdd(texture.Id, 0))
+                    .Select(texture => assets.LoadAsync(texture, null, CancellationToken.None)),
+            ]
+            : [];
         await threads.Enter(EngineThread.Render);
         _materials[handle.Id] = loaded;
         if (!loaded.Ok)
@@ -782,6 +810,9 @@ internal sealed class GpuResources(
             if (sampled != Handle<Texture>.None)
                 Get(sampled, out _, out _);
         }
+
+        // Held until the asks took them, so a texture that loaded before its ask is not read again.
+        await Task.WhenAll(reading).ConfigureAwait(false);
     }
 
     private async Task LoadAsync(Handle<Texture> handle, TextureEntry entry)

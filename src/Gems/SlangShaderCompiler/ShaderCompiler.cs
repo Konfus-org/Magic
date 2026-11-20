@@ -1,8 +1,10 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.IO.Hashing;
 using System.Linq;
 using System.Text;
@@ -29,6 +31,21 @@ internal readonly record struct SlangModule(string Name, string Path, string Sou
 internal readonly record struct Reflection(ImmutableArray<ShaderField> Fields, long? Constant);
 
 /// <summary>
+/// One compiler of the pool: its own global session, and a session for each optimization level that keeps the modules
+/// it loaded for the next compile.
+/// </summary>
+/// <remarks>
+/// Only one thread at a time uses a worker and all that it made: Slang lets distinct global sessions run at the same
+/// time, but not two calls into one global session or what it made.
+/// </remarks>
+internal sealed record Worker(nint GlobalSession, Dictionary<ShaderOptimization, LoadedSession> Sessions);
+
+/// <summary>
+/// A session, and each module loaded into it by its path, with the text that it was loaded from.
+/// </summary>
+internal sealed record LoadedSession(nint Handle, Dictionary<string, (string Source, nint Module)> Modules);
+
+/// <summary>
 /// Compiles Slang entries to SPIR-V, and caches each result under a hash of its sources.
 /// </summary>
 /// <remarks>
@@ -47,6 +64,15 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     /// </summary>
     private const int IdleMs = 10_000;
 
+    /// <summary>
+    /// How many compiles and reflections run at the same time, each on its own <see cref="Worker"/>.
+    /// </summary>
+    /// <remarks>
+    /// Each worker holds a global session of a few hundred megabytes, so the pool stays small.
+    /// </remarks>
+    // PROTO: the cap of 4 is a guess, to tune from a measured cold load.
+    private static readonly int _workerCount = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+
     private readonly AssetManager _assets;
 
     private readonly Caches _caches;
@@ -54,9 +80,22 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     private readonly SlangShaderCompilerSettings _settings;
 
     /// <summary>
-    /// One compile at a time: the compiler's global session is not for several threads at once.
+    /// One slot for each worker that can run: a compile holds one while it uses a worker.
     /// </summary>
-    private readonly SemaphoreSlim _compiling = new(1, 1);
+    private readonly SemaphoreSlim _compiling = new(_workerCount, _workerCount);
+
+    /// <summary>
+    /// The workers that no compile uses now. A compile that finds none makes one, which its slot in
+    /// <see cref="_compiling"/> allows (a pool).
+    /// </summary>
+    private readonly ConcurrentStack<Worker> _workers = new();
+
+    private readonly Meter _meter = new("Magic.Gems.SlangShaderCompiler");
+
+    /// <summary>
+    /// The seconds of each phase of a shader's load, tagged with the phase: compile, reflect or lock_wait.
+    /// </summary>
+    private readonly Histogram<double> _loadDuration;
 
     /// <summary>
     /// The run's <see cref="App.Lifetime"/>, which ends before the gem is disposed, so compiles still waiting for their
@@ -65,8 +104,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     private readonly CancellationToken _lifetime;
 
     /// <summary>
-    /// Releases the global session <see cref="IdleMs"/> after the last compile; each compile starts it again, as a
-    /// debounce.
+    /// Releases the workers <see cref="IdleMs"/> after the last compile; each compile starts it again, as a debounce.
     /// </summary>
     [SuppressMessage(
         "Usage",
@@ -75,26 +113,31 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     )]
     private readonly Timer _idle;
 
-    /// <summary>
-    /// The compiler, a few hundred megabytes: null until a compile needs it, and again once it has been idle. Read and
-    /// written only while holding <see cref="_compiling"/>.
-    /// </summary>
-    private unsafe void* _globalSession;
-
     internal ShaderCompiler(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
     {
         _assets = assets;
         _caches = caches;
         _settings = settings;
         _lifetime = app.Lifetime;
+        _loadDuration = _meter.CreateHistogram<double>(
+            "magic.gems.slang_shader_compiler.load.duration",
+            "s",
+            "One phase of a shader's load."
+        );
         _idle = new Timer(_ =>
         {
-            // A compile that holds the session sets the timer off again as it ends.
-            if (!_compiling.Wait(0))
-                return;
+            // The workers go only when every slot is free. A compile that holds a slot sets the timer off again as it
+            // ends.
+            int taken = 0;
+            while (taken < _workerCount && _compiling.Wait(0))
+            {
+                taken++;
+            }
 
-            ReleaseGlobalSession();
-            _compiling.Release();
+            if (taken == _workerCount)
+                ReleaseWorkers();
+            if (taken > 0)
+                _compiling.Release(taken);
         });
     }
 
@@ -105,17 +148,22 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
 
     public void Dispose()
     {
-        // The compile already running finishes, then the timer stops, a release it began finishing, before the session is
-        // freed. Waiting for them is safe: the frame loop has ended, and neither needs an engine thread.
-        _compiling.Wait();
+        // The compiles already running finish, then the timer stops, a release it began finishing, before the workers
+        // are freed. Waiting for them is safe: the frame loop has ended, and neither needs an engine thread.
+        for (int i = 0; i < _workerCount; i++)
+        {
+            _compiling.Wait();
+        }
+
         using (ManualResetEvent stopped = new(false))
         {
             _idle.Dispose(stopped);
             stopped.WaitOne();
         }
 
-        ReleaseGlobalSession();
+        ReleaseWorkers();
         _compiling.Dispose();
+        _meter.Dispose();
     }
 
     public async Task<Result<CompiledShader>> CompileAsync(ShaderEntry entry, CancellationToken cancel)
@@ -157,7 +205,8 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         Log.Verbose($"Shader compiling: {entryPath}: {entry.Name}.");
         long started = Stopwatch.GetTimestamp();
         Result<CompiledShader> compiled = await RunAsync(
-                () => Compile(modules.Value, entryPath, entry, typeArguments, optimization),
+                worker => Compile(worker, modules.Value, entryPath, entry, typeArguments, optimization),
+                "compile",
                 cancel
             )
             .ConfigureAwait(false);
@@ -392,53 +441,16 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         );
     }
 
-    void ICache<Reflection>.Write(Reflection value, IBufferWriter<byte> bytes)
-    {
-        // Whether the constant is declared and its value, the number of fields, then each field.
-        Span<byte> header = bytes.GetSpan(13);
-        header[0] = value.Constant is null ? (byte)0 : (byte)1;
-        BinaryPrimitives.WriteInt64LittleEndian(header[1..], value.Constant ?? 0);
-        BinaryPrimitives.WriteInt32LittleEndian(header[9..], value.Fields.Length);
-        bytes.Advance(13);
-        foreach (ShaderField field in value.Fields)
-        {
-            Span<byte> sizes = bytes.GetSpan(8);
-            BinaryPrimitives.WriteUInt32LittleEndian(sizes, field.Offset);
-            BinaryPrimitives.WriteUInt32LittleEndian(sizes[4..], field.Size);
-            bytes.Advance(8);
-            WriteText(bytes, field.Name);
-            WriteText(bytes, field.Struct);
-        }
-    }
-
-    Result<Reflection> ICache<Reflection>.Read(ReadOnlySpan<byte> bytes)
-    {
-        // Bytes cut short throw from a slice, which the caches take as a dirty entry.
-        long? constant = bytes[0] == 0 ? null : BinaryPrimitives.ReadInt64LittleEndian(bytes[1..]);
-        int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[9..]);
-        bytes = bytes[13..];
-        ImmutableArray<ShaderField>.Builder fields = ImmutableArray.CreateBuilder<ShaderField>(count);
-        for (int i = 0; i < count; i++)
-        {
-            uint offset = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
-            uint size = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]);
-            bytes = bytes[8..];
-            string name = ReadText(ref bytes);
-            fields.Add(new ShaderField(name, offset, size, ReadText(ref bytes)));
-        }
-
-        return Result.Success(new Reflection(fields.MoveToImmutable(), constant));
-    }
-
     /// <summary>
-    /// Compiles one entry to SPIR-V in a session over the global one, and releases everything after.
+    /// Compiles one entry to SPIR-V in the worker's session at <paramref name="optimization"/>, and releases all but the
+    /// session and its modules after.
     /// </summary>
     /// <remarks>
     /// It loads the modules into the session in dependency order, then finds, specialises and links the entry. It is
-    /// pure over its inputs, apart from the compiler it drives, so <see cref="_compiling"/> is all the thread safety it
-    /// needs.
+    /// pure over its inputs, apart from the worker it drives, which only this compile uses while it runs.
     /// </remarks>
-    private unsafe Result<CompiledShader> Compile(
+    private static unsafe Result<CompiledShader> Compile(
+        Worker worker,
         ImmutableArray<SlangModule> modules,
         string entryPath,
         in ShaderEntry entry,
@@ -452,25 +464,22 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         int result;
         try
         {
-            Result<nint> made = CreateSession(optimization);
-            if (!made.Ok)
-                return Result.Failure(made.Error);
-
-            void* session = (void*)made.Value;
-            owned.Add(made.Value);
-            Result<Dictionary<string, nint>> loaded = LoadModules(session, modules);
+            Result<LoadedSession> loaded = LoadModules(worker, optimization, modules);
             if (!loaded.Ok)
                 return Result.Failure(loaded.Error);
 
+            void* session = (void*)loaded.Value.Handle;
+            Dictionary<string, (string Source, nint Module)> loadedModules = loaded.Value.Modules;
+
             // The entry's module, and its type arguments' in the order they loaded.
-            void* module = (void*)loaded.Value[entryPath];
+            void* module = (void*)loadedModules[entryPath].Module;
             List<nint> typeModules =
             [
                 .. modules
                     .Where(source =>
                         source.Path != entryPath && typeArguments.Any(argument => argument.Path == source.Path)
                     )
-                    .Select(source => loaded.Value[source.Path]),
+                    .Select(source => loadedModules[source.Path].Module),
             ];
 
             // The entry point, composed with its module and the type arguments' modules into one program, so a type
@@ -584,63 +593,34 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// Runs <paramref name="work"/> on a worker when the compiler is free, one at a time, as the global session allows.
+    /// Starts a worker with a global session of its own, or why not.
     /// </summary>
-    /// <remarks>
-    /// Work that comes after the gem is disposed ends cancelled, and so does work that still waits for its turn.
-    /// </remarks>
-    private Task<T> RunAsync<T>(Func<T> work, CancellationToken cancel) =>
-        Task.Run(
-            async () =>
-            {
-                try
-                {
-                    using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
-                        cancel,
-                        _lifetime
-                    );
-                    await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
-                }
-                catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
-                {
-                    throw new OperationCanceledException("The shader compiler is disposed.");
-                }
+    private static unsafe Result<Worker> StartWorker()
+    {
+        void* globalSession = Slang.CreateGlobalSession();
 
-                try
-                {
-                    return work();
-                }
-                finally
-                {
-                    _idle.Change(IdleMs, Timeout.Infinite);
-                    _compiling.Release();
-                }
-            },
-            cancel
-        );
+        return globalSession == null
+            ? Result.Failure("the Slang compiler could not start.")
+            : Result.Success(new Worker((nint)globalSession, []));
+    }
 
     /// <summary>
-    /// Creates a session at <paramref name="optimization"/>, and starts the compiler when it is not running.
+    /// Creates a session over <paramref name="globalSession"/> at <paramref name="optimization"/>.
     /// </summary>
     /// <remarks>
     /// The session uses SPIR-V 1.6, row-major matrices, kept entry names, warnings as errors, and scalar buffer layout,
     /// because C# packs a struct and the heap reads one that way. A change here, other than to the level, must raise
     /// Version.
     /// </remarks>
-    private unsafe Result<nint> CreateSession(ShaderOptimization optimization)
+    private static unsafe Result<nint> CreateSession(void* globalSession, ShaderOptimization optimization)
     {
-        if (_globalSession == null)
-            _globalSession = Slang.CreateGlobalSession();
-        if (_globalSession == null)
-            return Result.Failure("the Slang compiler could not start.");
-
         int result;
         void* session;
         fixed (byte* profileName = "spirv_1_6\0"u8)
         fixed (byte* all = "all\0"u8)
         fixed (byte* profileUpgrade = "41012\0"u8)
         {
-            int profile = Slang.FindProfile(_globalSession, profileName);
+            int profile = Slang.FindProfile(globalSession, profileName);
             if (profile == 0)
                 return Result.Failure("the compiler has no spirv_1_6 profile.");
 
@@ -670,7 +650,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
                 CompilerOptionEntries = options,
                 CompilerOptionEntryCount = 7,
             };
-            result = Slang.CreateSession(_globalSession, &desc, &session);
+            result = Slang.CreateSession(globalSession, &desc, &session);
             if (result < 0 || session == null)
                 return Result.Failure($"the compiler gave no session: {result:X}.");
         }
@@ -679,18 +659,50 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// Loads <paramref name="modules"/> into <paramref name="session"/>, by their paths; or the first module that does
-    /// not compile.
+    /// Loads into the worker's session at <paramref name="optimization"/> each of <paramref name="modules"/> that it has
+    /// not loaded yet; or the first module that does not compile.
     /// </summary>
     /// <remarks>
-    /// The session owns the modules, and frees them with itself.
+    /// The session owns the modules, and frees them with itself. Modules that later compiles share, such as the heap,
+    /// load one time for each worker. A session that loaded another text of a module, or that a module did not compile
+    /// in, goes for a new one, because what imports that module can change with it.
     /// </remarks>
-    private unsafe Result<Dictionary<string, nint>> LoadModules(void* session, ImmutableArray<SlangModule> modules)
+    private static unsafe Result<LoadedSession> LoadModules(
+        Worker worker,
+        ShaderOptimization optimization,
+        ImmutableArray<SlangModule> modules
+    )
     {
-        void* diagnostics = null;
-        Dictionary<string, nint> loaded = new(StringComparer.Ordinal);
+        LoadedSession? session = worker.Sessions.GetValueOrDefault(optimization);
         foreach (SlangModule source in modules)
         {
+            if (
+                session is not null
+                && session.Modules.TryGetValue(source.Path, out (string Source, nint Module) loaded)
+                && loaded.Source != source.Source
+            )
+            {
+                Drop();
+                session = null;
+            }
+        }
+
+        if (session is null)
+        {
+            Result<nint> made = CreateSession((void*)worker.GlobalSession, optimization);
+            if (!made.Ok)
+                return Result.Failure(made.Error);
+
+            session = new LoadedSession(made.Value, new(StringComparer.Ordinal));
+            worker.Sessions[optimization] = session;
+        }
+
+        void* diagnostics = null;
+        foreach (SlangModule source in modules)
+        {
+            if (session.Modules.ContainsKey(source.Path))
+                continue;
+
             void* module;
             fixed (
                 byte* name = CString.ToBytes(source.Name),
@@ -698,18 +710,155 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
                     text = CString.ToBytes(source.Source)
             )
             {
-                module = Slang.LoadModuleFromSourceString(session, name, path, text, &diagnostics);
+                module = Slang.LoadModuleFromSourceString((void*)session.Handle, name, path, text, &diagnostics);
             }
 
             string messages = TakeDiagnostics(ref diagnostics);
             if (module == null)
-                return Result.Failure($"{source.Path} does not compile:\n{messages}");
+            {
+                Drop();
 
-            loaded[source.Path] = (nint)module;
+                return Result.Failure($"{source.Path} does not compile:\n{messages}");
+            }
+
+            session.Modules[source.Path] = (source.Source, (nint)module);
         }
 
-        return Result.Success(loaded);
+        return Result.Success(session);
+
+        void Drop()
+        {
+            if (worker.Sessions.Remove(optimization, out LoadedSession? dropped))
+                Slang.Release((void*)dropped.Handle);
+        }
     }
+
+    /// <summary>
+    /// Reads with <paramref name="read"/> the type <paramref name="typeName"/> in the module at
+    /// <paramref name="typePath"/>.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="read"/> gets the module's layout and the type, which both stay alive with the worker's session.
+    /// </remarks>
+    private static unsafe Result<Reflection> Reflect(
+        Worker worker,
+        ImmutableArray<SlangModule> modules,
+        string typePath,
+        string typeName,
+        Func<nint, nint, Reflection> read
+    )
+    {
+        // A struct's layout is the same at any level, so reflection compiles at the quickest.
+        Result<LoadedSession> loaded = LoadModules(worker, ShaderOptimization.None, modules);
+        if (!loaded.Ok)
+            return Result.Failure(loaded.Error);
+
+        void* diagnostics = null;
+        void* layout = Slang.GetLayout((void*)loaded.Value.Modules[typePath].Module, 0, &diagnostics);
+        TakeDiagnostics(ref diagnostics);
+        void* type;
+        fixed (byte* named = CString.ToBytes(typeName))
+        {
+            type = layout == null ? null : Slang.spReflection_FindTypeByName(layout, named);
+        }
+
+        if (type == null)
+            return Result.Failure($"{typePath} declares no type {typeName}.");
+
+        return Result.Success(read((nint)layout, (nint)type));
+    }
+
+    void ICache<Reflection>.Write(Reflection value, IBufferWriter<byte> bytes)
+    {
+        // Whether the constant is declared and its value, the number of fields, then each field.
+        Span<byte> header = bytes.GetSpan(13);
+        header[0] = value.Constant is null ? (byte)0 : (byte)1;
+        BinaryPrimitives.WriteInt64LittleEndian(header[1..], value.Constant ?? 0);
+        BinaryPrimitives.WriteInt32LittleEndian(header[9..], value.Fields.Length);
+        bytes.Advance(13);
+        foreach (ShaderField field in value.Fields)
+        {
+            Span<byte> sizes = bytes.GetSpan(8);
+            BinaryPrimitives.WriteUInt32LittleEndian(sizes, field.Offset);
+            BinaryPrimitives.WriteUInt32LittleEndian(sizes[4..], field.Size);
+            bytes.Advance(8);
+            WriteText(bytes, field.Name);
+            WriteText(bytes, field.Struct);
+        }
+    }
+
+    Result<Reflection> ICache<Reflection>.Read(ReadOnlySpan<byte> bytes)
+    {
+        // Bytes cut short throw from a slice, which the caches take as a dirty entry.
+        long? constant = bytes[0] == 0 ? null : BinaryPrimitives.ReadInt64LittleEndian(bytes[1..]);
+        int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[9..]);
+        bytes = bytes[13..];
+        ImmutableArray<ShaderField>.Builder fields = ImmutableArray.CreateBuilder<ShaderField>(count);
+        for (int i = 0; i < count; i++)
+        {
+            uint offset = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+            uint size = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]);
+            bytes = bytes[8..];
+            string name = ReadText(ref bytes);
+            fields.Add(new ShaderField(name, offset, size, ReadText(ref bytes)));
+        }
+
+        return Result.Success(new Reflection(fields.MoveToImmutable(), constant));
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> on a free worker, on a thread of the pool, when a slot in
+    /// <see cref="_compiling"/> is free.
+    /// </summary>
+    /// <remarks>
+    /// Work that comes after the gem is disposed ends cancelled, and so does work that still waits for its turn.
+    /// </remarks>
+    private Task<Result<T>> RunAsync<T>(Func<Worker, Result<T>> work, string phase, CancellationToken cancel) =>
+        Task.Run(
+            async () =>
+            {
+                try
+                {
+                    using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
+                        cancel,
+                        _lifetime
+                    );
+                    long waitStart = _loadDuration.Start();
+                    await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
+                    _loadDuration.RecordSince(
+                        waitStart,
+                        new KeyValuePair<string, object?>(Metrics.PhaseTag, "lock_wait")
+                    );
+                }
+                catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException("The shader compiler is disposed.");
+                }
+
+                Worker? worker = null;
+                try
+                {
+                    long workStart = _loadDuration.Start();
+                    Result<Worker> taken = _workers.TryPop(out worker) ? Result.Success(worker) : StartWorker();
+                    if (!taken.Ok)
+                        return Result.Failure(taken.Error);
+
+                    worker = taken.Value;
+                    Result<T> result = work(worker);
+                    _loadDuration.RecordSince(workStart, new KeyValuePair<string, object?>(Metrics.PhaseTag, phase));
+
+                    return result;
+                }
+                finally
+                {
+                    if (worker is not null)
+                        _workers.Push(worker);
+                    _idle.Change(IdleMs, Timeout.Infinite);
+                    _compiling.Release();
+                }
+            },
+            cancel
+        );
 
     /// <summary>
     /// Reads with <paramref name="read"/> the struct that <paramref name="type"/> names, in a session of its module and
@@ -741,7 +890,11 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         if (cached.Ok)
             return cached;
 
-        Result<Reflection> reflected = await RunAsync(() => Reflect(modules.Value, path, type.Type, read), cancel)
+        Result<Reflection> reflected = await RunAsync(
+                worker => Reflect(worker, modules.Value, path, type.Type, read),
+                "reflect",
+                cancel
+            )
             .ConfigureAwait(false);
         if (reflected.Ok)
             await _caches.WriteAsync(key, version, reflected.Value, this, cancel).ConfigureAwait(false);
@@ -750,106 +903,96 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// Reads with <paramref name="read"/> the type <paramref name="typeName"/> in the module at
-    /// <paramref name="typePath"/>.
+    /// Stops the workers and gives their memory back; the next compile starts one again.
     /// </summary>
     /// <remarks>
-    /// <paramref name="read"/> gets the session's layout and the type, which both stay alive until it returns.
+    /// Call it only while holding every slot of <see cref="_compiling"/>.
     /// </remarks>
-    private unsafe Result<Reflection> Reflect(
-        ImmutableArray<SlangModule> modules,
-        string typePath,
-        string typeName,
-        Func<nint, nint, Reflection> read
-    )
+    private unsafe void ReleaseWorkers()
     {
-        // A struct's layout is the same at any level, so reflection compiles at the quickest.
-        Result<nint> made = CreateSession(ShaderOptimization.None);
-        if (!made.Ok)
-            return Result.Failure(made.Error);
-
-        void* session = (void*)made.Value;
-        try
+        while (_workers.TryPop(out Worker? worker))
         {
-            Result<Dictionary<string, nint>> loaded = LoadModules(session, modules);
-            if (!loaded.Ok)
-                return Result.Failure(loaded.Error);
-
-            void* diagnostics = null;
-            void* layout = Slang.GetLayout((void*)loaded.Value[typePath], 0, &diagnostics);
-            TakeDiagnostics(ref diagnostics);
-            void* type;
-            fixed (byte* named = CString.ToBytes(typeName))
+            foreach (LoadedSession session in worker.Sessions.Values)
             {
-                type = layout == null ? null : Slang.spReflection_FindTypeByName(layout, named);
+                Slang.Release((void*)session.Handle);
             }
 
-            if (type == null)
-                return Result.Failure($"{typePath} declares no type {typeName}.");
-
-            return Result.Success(read((nint)layout, (nint)type));
+            Slang.Release((void*)worker.GlobalSession);
         }
-        finally
-        {
-            Slang.Release(session);
-        }
-    }
-
-    /// <summary>
-    /// Stops the compiler and gives its memory back; the next compile starts it again.
-    /// </summary>
-    /// <remarks>
-    /// Call it only while holding <see cref="_compiling"/>.
-    /// </remarks>
-    private unsafe void ReleaseGlobalSession()
-    {
-        if (_globalSession == null)
-            return;
-
-        Slang.Release(_globalSession);
-        _globalSession = null;
     }
 
     /// <summary>
     /// Loads the modules at <paramref name="roots"/> and everything they import, each once, with imports before what
     /// imports them.
     /// </summary>
+    /// <remarks>
+    /// It reads one level of imports at a time, all of the level at once, then puts the modules in order.
+    /// </remarks>
     private async Task<Result<ImmutableArray<SlangModule>>> LoadModulesAsync(
         List<string> roots,
         CancellationToken cancel
     )
     {
+        // Each module's text and the paths that it imports, by its path.
+        Dictionary<string, (string Text, List<string> Imports)> read = new(StringComparer.Ordinal);
+
+        // The paths to read next, each with the module that imports it, or empty for a root.
+        List<(string Path, string ImportedBy)> level = [.. roots.Distinct().Select(root => (root, string.Empty))];
+        while (level.Count > 0)
+        {
+            Result<Shader>[] shaders = await Task.WhenAll(level.Select(module => LoadShaderAsync(module.Path, cancel)))
+                .ConfigureAwait(false);
+            for (int i = 0; i < level.Count; i++)
+            {
+                (string path, string importedBy) = level[i];
+                Result<Shader> shader = shaders[i];
+                if (!shader.Ok)
+                {
+                    return Result.Failure(
+                        importedBy.Length == 0 ? shader.Error : $"{importedBy} imports {path}: {shader.Error}"
+                    );
+                }
+
+                string text = shader.Value.Text;
+                List<string> imports =
+                [
+                    .. ImportLine()
+                        .Matches(text)
+                        .Select(import => $"{ShadersFolder}/{import.Groups[1].Value.Replace('.', '/')}{Extension}"),
+                ];
+                read[path] = (text, imports);
+            }
+
+            List<(string Path, string ImportedBy)> next = [];
+            foreach ((string path, _) in level)
+            {
+                foreach (string import in read[path].Imports)
+                {
+                    if (!read.ContainsKey(import) && !next.Exists(module => module.Path == import))
+                        next.Add((import, path));
+                }
+            }
+
+            level = next;
+        }
+
         List<SlangModule> ordered = [];
         HashSet<string> visited = new(StringComparer.Ordinal);
         foreach (string root in roots)
         {
-            Result visitedRoot = await VisitAsync(root).ConfigureAwait(false);
-            if (!visitedRoot.Ok)
-                return Result.Failure(visitedRoot.Error);
+            Visit(root);
         }
 
         return Result.Success(ordered.ToImmutableArray());
 
-        async Task<Result> VisitAsync(string path)
+        void Visit(string path)
         {
             if (!visited.Add(path))
-                return Result.Success();
+                return;
 
-            Handle<Shader> handle = _assets.Find<Shader>(path);
-            if (handle == Handle<Shader>.None)
-                return Result.Failure($"there is no {path}.");
-
-            Result<Shader> loaded = await _assets.LoadAsync(handle, null, cancel).ConfigureAwait(false);
-            if (!loaded.Ok)
-                return Result.Failure($"{path} could not be read: {loaded.Error}");
-
-            foreach (Match import in ImportLine().Matches(loaded.Value.Text))
+            foreach (string import in read[path].Imports)
             {
-                string importedName = import.Groups[1].Value;
-                Result visitedImport = await VisitAsync($"{ShadersFolder}/{importedName.Replace('.', '/')}{Extension}")
-                    .ConfigureAwait(false);
-                if (!visitedImport.Ok)
-                    return Result.Failure($"{path} imports {importedName}: {visitedImport.Error}");
+                Visit(import);
             }
 
             // Shaders/Core/Heap.slang as the compiler names it, Core/Heap, which is what import Core.Heap; asks for.
@@ -859,9 +1002,21 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
             if (name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
                 name = name[..^Extension.Length];
 
-            ordered.Add(new SlangModule(name, path, loaded.Value.Text));
-
-            return Result.Success();
+            ordered.Add(new SlangModule(name, path, read[path].Text));
         }
+    }
+
+    /// <summary>
+    /// Loads the <see cref="Shader"/> asset at <paramref name="path"/>, or why not.
+    /// </summary>
+    private async Task<Result<Shader>> LoadShaderAsync(string path, CancellationToken cancel)
+    {
+        Handle<Shader> handle = _assets.Find<Shader>(path);
+        if (handle == Handle<Shader>.None)
+            return Result.Failure($"there is no {path}.");
+
+        Result<Shader> loaded = await _assets.LoadAsync(handle, null, cancel).ConfigureAwait(false);
+
+        return loaded.Ok ? loaded : Result.Failure($"{path} could not be read: {loaded.Error}");
     }
 }

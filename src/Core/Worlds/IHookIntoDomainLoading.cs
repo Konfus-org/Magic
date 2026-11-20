@@ -15,6 +15,19 @@ namespace Magic.Worlds;
 public interface IHookIntoDomainLoading
 {
     /// <summary>
+    /// Starts to load what the entities that load in place of the world need, such as their models and textures, as
+    /// soon as they are read.
+    /// </summary>
+    /// <remarks>
+    /// It runs before the world fades to the loading screen, while the world that leaves still shows, so it changes
+    /// nothing that shows. The loads go on while the fades and the loading screen show. The world waits for this hook
+    /// only before <see cref="OnDomainLoadingAsync"/>, which still waits until what the entities need is ready.
+    /// <paramref name="entities"/> is as <see cref="OnDomainLoadingAsync"/> gets it.
+    /// </remarks>
+    Task OnDomainReadAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
+        Task.CompletedTask;
+
+    /// <summary>
     /// Drops what the gem made from the world that left, such as the history of a renderer, so none of it shows next.
     /// </summary>
     /// <remarks>

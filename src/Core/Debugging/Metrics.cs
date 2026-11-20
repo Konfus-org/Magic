@@ -41,8 +41,42 @@ public static class Metrics
     /// </summary>
     public const string StepTag = "magic.core.step";
 
+    /// <summary>
+    /// One phase of an asset's load, tagged with <see cref="TypeTag"/> and <see cref="PhaseTag"/>.
+    /// </summary>
+    public const string AssetLoadDuration = "magic.core.assets.load.duration";
+
+    /// <summary>
+    /// One build of the asset index.
+    /// </summary>
+    public const string AssetIndexDuration = "magic.core.assets.index.duration";
+
+    /// <summary>
+    /// One phase of a world's load, save or restore, tagged with <see cref="PhaseTag"/>.
+    /// </summary>
+    public const string WorldLoadDuration = "magic.core.world.load.duration";
+
+    /// <summary>
+    /// The asset type that a load phase belongs to.
+    /// </summary>
+    public const string TypeTag = "magic.core.assets.type";
+
+    /// <summary>
+    /// The phase of a load that a duration measures.
+    /// </summary>
+    public const string PhaseTag = "magic.core.phase";
+
     internal static Meter Meter { get; } = new("Magic.Core");
 
     internal static Histogram<double> HookDurations { get; } =
         Meter.CreateHistogram<double>(HookDuration, "s", "One gem's hook.");
+
+    internal static Histogram<double> AssetLoadDurations { get; } =
+        Meter.CreateHistogram<double>(AssetLoadDuration, "s", "One phase of an asset's load.");
+
+    internal static Histogram<double> AssetIndexDurations { get; } =
+        Meter.CreateHistogram<double>(AssetIndexDuration, "s", "One build of the asset index.");
+
+    internal static Histogram<double> WorldLoadDurations { get; } =
+        Meter.CreateHistogram<double>(WorldLoadDuration, "s", "One phase of a world's load, save or restore.");
 }

@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Linq;
 using Magic.Debugging;
 using Magic.Projects;
 using Magic.Utils;
@@ -43,6 +44,8 @@ public sealed class Caches
     /// How long an entry that no run reads or writes is kept on this machine.
     /// </summary>
     private static readonly TimeSpan _keptUnused = TimeSpan.FromDays(30);
+
+    private readonly SemaphoreSlim[] _writeGates = [.. Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1))];
 
     private readonly IFileSystem _files;
 
@@ -100,6 +103,36 @@ public sealed class Caches
             _ = _files.Touch(file);
 
         return fromUser;
+    }
+
+    /// <summary>
+    /// The bytes of the record <paramref name="name"/> in this user's cache folder for the project, or null when there
+    /// is none, it cannot be read or no project is open.
+    /// </summary>
+    /// <remarks>
+    /// A record is one file that a part keeps for itself, beside the entries and swept with them.
+    /// </remarks>
+    public byte[]? ReadRecord(string name) =>
+        _project is null && _app.Project is null ? null
+        : _files.ReadBytes(_files.Combine(UserCacheFolder, name)) is { Ok: true, Value: { } bytes } ? bytes
+        : null;
+
+    /// <summary>
+    /// Keeps <paramref name="bytes"/> as the record <paramref name="name"/>, in place of what was there.
+    /// </summary>
+    /// <remarks>
+    /// As <see cref="WriteAsync{T}"/>, a reader never finds half a record, and a failure only logs a warning. With no
+    /// project open there is no cache folder, so nothing is kept, as <see cref="ReadRecord"/> finds nothing.
+    /// </remarks>
+    public async Task WriteRecordAsync(string name, ReadOnlyMemory<byte> bytes)
+    {
+        if (_project is null && _app.Project is null)
+            return;
+
+        string file = _files.Combine(UserCacheFolder, name);
+        Result written = await WriteFileAsync(file, bytes, CancellationToken.None).ConfigureAwait(false);
+        if (!written.Ok)
+            Log.Warn($"{file} could not be written: {written.Error}");
     }
 
     /// <summary>
@@ -168,9 +201,30 @@ public sealed class Caches
         cache.Write(value, entry);
 
         string file = GetEntryFile<T>(UserCacheFolder, key);
-        Result written = await _files.WriteAsync(file, entry.WrittenMemory, cancel).ConfigureAwait(false);
+        Result written = await WriteFileAsync(file, entry.WrittenMemory, cancel).ConfigureAwait(false);
         if (!written.Ok)
             Log.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
+    }
+
+    /// <summary>
+    /// Writes <paramref name="bytes"/> to <paramref name="file"/>, one write of a file at a time in this process: two
+    /// replaces of one file at once are refused on Windows. A read does not take the gate: <see cref="IFileSystem"/>
+    /// reads share delete, so a replace does not collide with it. The later write wins. A file hashes to one of a fixed
+    /// set of gates, so unrelated files rarely wait for each other.
+    /// </summary>
+    private async Task<Result> WriteFileAsync(string file, ReadOnlyMemory<byte> bytes, CancellationToken cancel)
+    {
+        int hash = StringComparer.OrdinalIgnoreCase.GetHashCode(file) & int.MaxValue;
+        SemaphoreSlim gate = _writeGates[hash % _writeGates.Length];
+        await gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            return await _files.WriteAsync(file, bytes, cancel).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ = gate.Release();
+        }
     }
 
     /// <summary>
@@ -195,6 +249,7 @@ public sealed class Caches
         CancellationToken cancel
     )
     {
+        // The check is only to skip the cost of a refused read: a file gone between it and the read is a failed read.
         if (!_files.FileExists(file))
             return Result.Failure($"nothing is cached at {file}.");
 

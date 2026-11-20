@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Threading.Channels;
 using Magic.Threading;
 
 namespace Magic.Debugging;
@@ -30,9 +29,30 @@ internal static class MetricsLog
     public const string All = "all";
 
     /// <summary>
+    /// The category of the load instruments, such as <c>magic.core.assets.load.duration</c>. Unlike others, it measures
+    /// from the start of the process, because a load is over before a command can ask for it.
+    /// </summary>
+    public const string Load = "load";
+
+    /// <summary>
+    /// Records the <see cref="Load"/> instruments from the start of the process; null before that.
+    /// </summary>
+    private static Sampler? _loads;
+
+    /// <summary>
     /// Stops the running log; null while none runs.
     /// </summary>
     private static CancellationTokenSource? _stop;
+
+    /// <summary>
+    /// Starts to record the <see cref="Load"/> instruments until the result is disposed.
+    /// </summary>
+    public static IDisposable RecordLoads()
+    {
+        _loads = new Sampler(Load);
+
+        return _loads;
+    }
 
     /// <summary>
     /// Logs <paramref name="category"/> every <paramref name="everySec"/> seconds, in place of the log before. 0 stops
@@ -52,6 +72,10 @@ internal static class MetricsLog
     /// </summary>
     public static async Task<string> SampleAsync(string category, TimeSpan over, CancellationToken cancel)
     {
+        // What the loads of the run so far measured, which a print does not clear.
+        if (category == Load && _loads is { } loads)
+            return loads.Describe();
+
         using Sampler sampler = new(category);
         await Task.Delay(over, cancel).ConfigureAwait(false);
 
@@ -71,7 +95,7 @@ internal static class MetricsLog
         }
     }
 
-    private static string Describe(string name, in Sum sum, double seconds)
+    private static string DescribeSum(string name, in Sum sum, double seconds)
     {
         string unit = sum.Instrument.Unit ?? string.Empty;
         string perSecond = string.Create(CultureInfo.InvariantCulture, $"{sum.Count / seconds:0.#}/s");
@@ -100,11 +124,6 @@ internal static class MetricsLog
         };
 
     /// <summary>
-    /// One measurement from the thread that recorded it: its instrument, its name with its tags' values, and its value.
-    /// </summary>
-    private readonly record struct Measured(Instrument Instrument, string Key, double Value);
-
-    /// <summary>
     /// What one instrument measured under one set of tags since the last summary.
     /// </summary>
     private readonly record struct Sum(Instrument Instrument, int Count, double Total, double Max, double Latest);
@@ -113,16 +132,15 @@ internal static class MetricsLog
     /// Listens to one category's instruments until it is disposed, and sums up what came since the last summary.
     /// </summary>
     /// <remarks>
-    /// The threads that record send each measurement through a channel.
+    /// The threads that record add each measurement to its sum under a lock, so the memory stays flat however long it
+    /// listens.
     /// </remarks>
     private sealed class Sampler : IDisposable
     {
         private readonly string _category;
         private readonly MeterListener _listener;
-        private readonly Channel<Measured> _measured = Channel.CreateUnbounded<Measured>(
-            new UnboundedChannelOptions { SingleReader = true }
-        );
-        private readonly Dictionary<string, Sum> _sums = [];
+        private readonly Lock _lock = new();
+        private Dictionary<string, Sum> _sums = [];
         private long _sinceTimestamp = Stopwatch.GetTimestamp();
 
         public Sampler(string category)
@@ -149,35 +167,50 @@ internal static class MetricsLog
         public void Dispose() => _listener.Dispose();
 
         /// <summary>
-        /// Sums up what was measured since the last summary or the start: a line per instrument and set of tags.
+        /// Describes what was measured since the last summary or the start: a line per instrument and set of tags. It
+        /// clears nothing.
+        /// </summary>
+        public string Describe()
+        {
+            _listener.RecordObservableInstruments();
+            Dictionary<string, Sum> sums;
+            double seconds;
+            lock (_lock)
+            {
+                sums = new(_sums);
+                seconds = Math.Max(Stopwatch.GetElapsedTime(_sinceTimestamp).TotalSeconds, 1e-6);
+            }
+
+            return Format(sums, seconds);
+        }
+
+        /// <summary>
+        /// Describes what was measured since the last summary or the start, then starts from nothing. A measurement
+        /// is in this summary or in the next one, never lost.
         /// </summary>
         public string Summarize()
         {
             _listener.RecordObservableInstruments();
-            while (_measured.Reader.TryRead(out Measured measurement))
+            Dictionary<string, Sum> sums;
+            double seconds;
+            lock (_lock)
             {
-                Sum sum = _sums.GetValueOrDefault(
-                    measurement.Key,
-                    new Sum(measurement.Instrument, 0, 0, double.MinValue, 0)
-                );
-                _sums[measurement.Key] = sum with
-                {
-                    Count = sum.Count + 1,
-                    Total = sum.Total + measurement.Value,
-                    Max = Math.Max(sum.Max, measurement.Value),
-                    Latest = measurement.Value,
-                };
+                sums = _sums;
+                _sums = [];
+                seconds = Math.Max(Stopwatch.GetElapsedTime(_sinceTimestamp).TotalSeconds, 1e-6);
+                _sinceTimestamp = Stopwatch.GetTimestamp();
             }
 
-            double seconds = Math.Max(Stopwatch.GetElapsedTime(_sinceTimestamp).TotalSeconds, 1e-6);
-            _sinceTimestamp = Stopwatch.GetTimestamp();
+            return Format(sums, seconds);
+        }
+
+        private string Format(Dictionary<string, Sum> sums, double seconds)
+        {
             string described = string.Join(
                 '\n',
-                _sums
-                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                    .Select(pair => Describe(pair.Key, pair.Value, seconds))
+                sums.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => DescribeSum(pair.Key, pair.Value, seconds))
             );
-            _sums.Clear();
 
             return string.Create(
                 CultureInfo.InvariantCulture,
@@ -207,7 +240,18 @@ internal static class MetricsLog
                 key = text.ToStringAndClear();
             }
 
-            _measured.Writer.TryWrite(new Measured(instrument, key, double.CreateTruncating(value)));
+            double measured = double.CreateTruncating(value);
+            lock (_lock)
+            {
+                Sum sum = _sums.GetValueOrDefault(key, new Sum(instrument, 0, 0, double.MinValue, 0));
+                _sums[key] = sum with
+                {
+                    Count = sum.Count + 1,
+                    Total = sum.Total + measured,
+                    Max = Math.Max(sum.Max, measured),
+                    Latest = measured,
+                };
+            }
         }
     }
 }

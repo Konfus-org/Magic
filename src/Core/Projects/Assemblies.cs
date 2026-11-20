@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Utils;
@@ -31,6 +33,14 @@ public sealed class Assemblies : IDisposable
     /// Replaced whole on the game thread, and read whole on any.
     /// </summary>
     private static FrozenDictionary<string, ImmutableArray<Type>> _byName = Index(_assemblies);
+
+    /// <summary>
+    /// What <see cref="Get{T}"/> found, for each index of the types.
+    /// </summary>
+    private static readonly ConditionalWeakTable<
+        FrozenDictionary<string, ImmutableArray<Type>>,
+        ConcurrentDictionary<(Type, string), Result<Type>>
+    > _answers = [];
 
     private readonly IFileSystem _files;
 
@@ -70,18 +80,12 @@ public sealed class Assemblies : IDisposable
     /// </summary>
     public static Result<Type> Get<T>(string name)
     {
-        ImmutableArray<Type> named = Volatile.Read(ref _byName).GetValueOrDefault(name, []);
-        ImmutableArray<Type> matching = named.RemoveAll(type => !typeof(T).IsAssignableFrom(type));
+        FrozenDictionary<string, ImmutableArray<Type>> index = Volatile.Read(ref _byName);
 
-        return matching.Length switch
-        {
-            1 => Result.Success(matching[0]),
-            0 => Result.Failure($"no code loaded declares a {typeof(T).Name} named {name}."),
-            _ => Result.Failure(
-                $"more than one {typeof(T).Name} is named {name}: "
-                    + $"{string.Join(", ", matching.Select(type => type.FullName))}."
-            ),
-        };
+        // The answers belong to this index, so a registered or unloaded assembly drops them with it.
+        ConcurrentDictionary<(Type, string), Result<Type>> found = _answers.GetValue(index, _ => new());
+
+        return found.GetOrAdd((typeof(T), name), key => Find(index, key.Item1, key.Item2));
     }
 
     /// <summary>
@@ -160,6 +164,22 @@ public sealed class Assemblies : IDisposable
     /// Loads the added assembly named <paramref name="name"/>, or gives why it could not be read.
     /// </summary>
     internal Result<Assembly> Load(string name) => _contexts[name].LoadCode();
+
+    private static Result<Type> Find(FrozenDictionary<string, ImmutableArray<Type>> index, Type wanted, string name)
+    {
+        ImmutableArray<Type> named = index.GetValueOrDefault(name, []);
+        ImmutableArray<Type> matching = named.RemoveAll(type => !wanted.IsAssignableFrom(type));
+
+        return matching.Length switch
+        {
+            1 => Result.Success(matching[0]),
+            0 => Result.Failure($"no code loaded declares a {wanted.Name} named {name}."),
+            _ => Result.Failure(
+                $"more than one {wanted.Name} is named {name}: "
+                    + $"{string.Join(", ", matching.Select(type => type.FullName))}."
+            ),
+        };
+    }
 
     /// <summary>
     /// Indexes the top-level types of <paramref name="assemblies"/> by name.

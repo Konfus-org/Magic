@@ -13,6 +13,7 @@
     <Project Path="Gems/AssimpModelImporter/AssimpModelImporter.csproj" />
     <Project Path="Gems/DomainImporter/DomainImporter.csproj" />
     <Project Path="Gems/PrefabImporter/PrefabImporter.csproj" />
+    <Project Path="Gems/SaveFiles/SaveFiles.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="Gems/SlangShaderCompiler/SlangShaderCompiler.csproj" />
     <Project Path="Gems/SdlBindings/SdlBindings.csproj" />

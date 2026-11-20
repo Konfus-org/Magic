@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -73,6 +74,29 @@ public sealed class AssetManager : IDisposable
     private readonly AssetWatches _watches;
 
     /// <summary>
+    /// What each asset directory holds, read once, so that an index never reads a directory again.
+    /// </summary>
+    private readonly AssetScans _scans;
+
+    /// <summary>
+    /// What each file's version was when it last had its size and write time, so a hit in the cache reads and hashes
+    /// nothing.
+    /// </summary>
+    private readonly SourceVersions _versions;
+
+    /// <summary>
+    /// The cache writes that run in the background, which <see cref="Dispose"/> waits for.
+    /// </summary>
+    private readonly ConcurrentDictionary<Task, byte> _writes = new();
+
+    /// <summary>
+    /// What a preprocessor made of a loaded asset on its import, by the asset's id and version and the preprocessor,
+    /// while the write of it to the cache runs: a <see cref="LoadPreprocessedAsync{T, TMade}"/> in that time finds it
+    /// here, so it is not made again. The write removes it when it ends, on each path.
+    /// </summary>
+    private readonly ConcurrentDictionary<(ulong Id, ulong Version, object Preprocessor), object> _making = new();
+
+    /// <summary>
     /// Where an <see cref="AssetReloaded"/> goes for each asset made again.
     /// </summary>
     private readonly EventCoordinator _events;
@@ -92,7 +116,9 @@ public sealed class AssetManager : IDisposable
         Caches = caches;
         _events = events;
         _app = app;
+        _scans = new AssetScans(files);
         _watches = new AssetWatches(files, this);
+        _versions = new SourceVersions(files, caches);
         BuiltIn = GetResources(files, typeof(AssetManager).Assembly, AppContext.BaseDirectory);
         Register(BuiltIn);
         Register(typeof(AssetManager).Assembly);
@@ -165,6 +191,11 @@ public sealed class AssetManager : IDisposable
         {
             waiter.TrySetCanceled(_app.Lifetime);
         }
+
+        // A write that the run leaves half done is a temporary file that the next run ignores; a short wait keeps the
+        // entries that are nearly written.
+        WaitForWrites();
+        _versions.Dispose();
     }
 
     /// <summary>
@@ -326,9 +357,19 @@ public sealed class AssetManager : IDisposable
         if (!Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
             return 0;
 
-        Result<byte[]> bytes = Files.ReadBytes(file.File);
+        int importer = Loaded.Importers.GetValueOrDefault(typeof(T)) is IAssetImporter<T> reader ? reader.Version : 0;
+        SourceVersions.Lookup lookup = _versions.Find(file.File, file.Settings, importer);
+        if (lookup.Hit)
+            return lookup.Version;
 
-        return bytes.Ok ? ComputeVersion<T>(bytes.Value, file.Settings) : 0;
+        Result<byte[]> bytes = Files.ReadBytes(file.File);
+        if (!bytes.Ok)
+            return 0;
+
+        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings, importer);
+        _versions.Remember(lookup, version);
+
+        return version;
     }
 
     /// <summary>
@@ -493,10 +534,28 @@ public sealed class AssetManager : IDisposable
         async Task RunAsync(ulong id, ulong version, object asset, CancellationToken cancel)
         {
             Result<TMade> cached = await Caches.ReadAsync(id, version, preprocessor, cancel).ConfigureAwait(false);
-            if (!cached.Ok)
-                await Caches
-                    .WriteAsync(id, version, preprocessor.Preprocess((T)asset), preprocessor, cancel)
-                    .ConfigureAwait(false);
+            if (cached.Ok)
+                return;
+
+            TMade made = preprocessor.Preprocess((T)asset);
+            (ulong, ulong, object) key = (id, version, preprocessor);
+            if (made is not null)
+                _making[key] = made;
+            KeepWriting(WriteAsync());
+
+            async Task WriteAsync()
+            {
+                try
+                {
+                    await Caches
+                        .WriteAsync(id, version, made, preprocessor, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    _ = _making.TryRemove(key, out _);
+                }
+            }
         }
     }
 
@@ -514,8 +573,11 @@ public sealed class AssetManager : IDisposable
     )
         where T : IAsset<T>
     {
-        ulong version = GetVersion(asset);
+        // The version may read and hash the file, so it is found on a worker: the caller can be the render thread.
+        long start = Metrics.AssetLoadDurations.Start();
+        ulong version = await Task.Run(() => GetVersion(asset), cancel).ConfigureAwait(false);
         Result<TMade> cached = await Caches.ReadAsync(asset.Id, version, preprocessor, cancel).ConfigureAwait(false);
+        RecordPhase(start, typeof(T).Name, "preprocessed_cache_read");
         if (cached.Ok)
             return cached;
 
@@ -524,9 +586,24 @@ public sealed class AssetManager : IDisposable
             return Result.Failure(loaded.Error);
 
         // Kept under the version the load made it at: before the type's importer is made, the version asked first lacks
-        // the importer's.
+        // the importer's. The import made it, and its write may still run: then it is here, else it is in the cache.
+        version = GetVersion(asset);
+        if (
+            _making.TryGetValue((asset.Id, version, preprocessor), out object? fromImport)
+            && fromImport is TMade madeByImport
+        )
+        {
+            return Result.Success(madeByImport);
+        }
+
+        cached = await Caches.ReadAsync(asset.Id, version, preprocessor, cancel).ConfigureAwait(false);
+        if (cached.Ok)
+            return cached;
+
+        start = Metrics.AssetLoadDurations.Start();
         TMade made = await Task.Run(() => preprocessor.Preprocess(loaded.Value), cancel).ConfigureAwait(false);
-        await Caches.WriteAsync(asset.Id, GetVersion(asset), made, preprocessor, cancel).ConfigureAwait(false);
+        KeepWriting(Caches.WriteAsync(asset.Id, version, made, preprocessor, CancellationToken.None));
+        RecordPhase(start, typeof(T).Name, "preprocessed_make");
 
         return Result.Success(made);
     }
@@ -753,11 +830,8 @@ public sealed class AssetManager : IDisposable
         // because both happen on the game thread.
         IndexedFile made = new(next.Value, type, GetAssetPath(index, file), file, default);
         ImmutableArray<string> directories = Database.Directories;
-        Reindex(
-            directories,
-            AssetIndex.Create(Files, directories, BuiltIn),
-            ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase, made.Path)
-        );
+        ImmutableHashSet<string> touched = ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase, made.Path);
+        Reindex(directories, ReadIndex(directories, touched), touched);
 
         return Result.Success(made);
     }
@@ -779,20 +853,29 @@ public sealed class AssetManager : IDisposable
         if (Database.Directories.Contains(directory, StringComparer.OrdinalIgnoreCase))
             return;
 
-        // Watched before it is read, so nothing written meanwhile is missed.
+        // Watched before it is read, so nothing written meanwhile is missed. Only this directory is read: the others
+        // are as their scans have them.
         _watches.Add(directory);
+        long scanStart = Metrics.AssetIndexDurations.Start();
+        _scans.Scan(directory);
+        Metrics.AssetIndexDurations.RecordSince(scanStart);
         while (true)
         {
             AssetDatabase database = Database;
             ImmutableArray<string> directories = database.Directories.IsEmpty
                 ? [directory]
                 : database.Directories.Insert(database.Directories.Length - 1, directory);
-            AssetIndex index = AssetIndex.Create(Files, directories, BuiltIn);
+            long indexStart = Metrics.AssetIndexDurations.Start();
+            AssetIndex index = AssetIndex.Create(_scans, directories, BuiltIn);
+            Metrics.AssetIndexDurations.RecordSince(indexStart);
             lock (_gate)
             {
                 // Indexed again meanwhile, they are read again, so neither read loses what the other found.
                 if (!ReferenceEquals(Database.Index, database.Index))
+                {
+                    _scans.Scan(directory);
                     continue;
+                }
 
                 Database = Database with { Directories = directories, Index = index };
             }
@@ -801,6 +884,20 @@ public sealed class AssetManager : IDisposable
 
             return;
         }
+    }
+
+    /// <summary>
+    /// The index of <paramref name="directories"/> after <paramref name="touched"/> changed: only those paths are read
+    /// again. Any thread.
+    /// </summary>
+    internal AssetIndex ReadIndex(ImmutableArray<string> directories, IReadOnlySet<string> touched)
+    {
+        long start = Metrics.AssetIndexDurations.Start();
+        _scans.Refresh(directories, touched);
+        AssetIndex index = AssetIndex.Create(_scans, directories, BuiltIn);
+        Metrics.AssetIndexDurations.RecordSince(start);
+
+        return index;
     }
 
     /// <summary>
@@ -1102,11 +1199,28 @@ public sealed class AssetManager : IDisposable
             return Fail($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}.");
         }
 
-        Result<byte[]> bytes = await Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
-        if (!bytes.Ok)
-            return Fail($"{file.Path} could not be read: {bytes.Error}");
+        string typeName = typeof(T).Name;
+        int importerVersion = reader?.Version ?? 0;
 
-        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings, reader?.Version ?? 0);
+        // The version of a file that did not change is known without reading it.
+        long start = Metrics.AssetLoadDurations.Start();
+        SourceVersions.Lookup lookup = _versions.Find(file.File, file.Settings, importerVersion);
+        RecordPhase(start, typeName, "version_lookup");
+        byte[] bytes = [];
+        bool isRead = false;
+        ulong version = lookup.Version;
+        if (!lookup.Hit)
+        {
+            Result<byte[]> read = await ReadSourceAsync().ConfigureAwait(false);
+            if (!read.Ok)
+                return Fail($"{file.Path} could not be read: {read.Error}");
+
+            start = Metrics.AssetLoadDurations.Start();
+            version = AssetIndex.ComputeVersion(bytes, file.Settings, importerVersion);
+            _versions.Remember(lookup, version);
+            RecordPhase(start, typeName, "hash");
+        }
+
         Result<AssetMetadata> metadata = ReadSettings<T>(file.Settings);
         if (!metadata.Ok)
             return new Made(Result.Failure(notAsset + metadata.Error), version);
@@ -1115,24 +1229,71 @@ public sealed class AssetManager : IDisposable
         ICache<T>? cache = reader as ICache<T>;
         if (cache is not null)
         {
+            start = Metrics.AssetLoadDurations.Start();
             Result<T> cached = await Caches.ReadAsync(id, version, cache, cancel).ConfigureAwait(false);
+            RecordPhase(start, typeName, "cache_read");
             if (cached.Ok)
-                return await PreprocessAsync(id, version, cached.Value, cancel).ConfigureAwait(false);
+            {
+                start = Metrics.AssetLoadDurations.Start();
+                Made fromCache = await PreprocessAsync(id, version, cached.Value, cancel).ConfigureAwait(false);
+                RecordPhase(start, typeName, "preprocess");
+
+                return fromCache;
+            }
         }
 
-        Result<T> read = reader is not null
+        if (!isRead)
+        {
+            Result<byte[]> read = await ReadSourceAsync().ConfigureAwait(false);
+            if (!read.Ok)
+                return Fail($"{file.Path} could not be read: {read.Error}");
+        }
+
+        start = Metrics.AssetLoadDurations.Start();
+        Result<T> imported = reader is not null
             ? await reader
-                .ImportAsync(new AssetFile(id, file.Path, bytes.Value, metadata.Value, version), progress, cancel)
+                .ImportAsync(new AssetFile(id, file.Path, bytes, metadata.Value, version), progress, cancel)
                 .ConfigureAwait(false)
-            : ReadCoreFormat<T>(bytes.Value, file.Settings);
-        if (!read.Ok)
-            return new Made(Result.Failure(notAsset + read.Error), version);
+            : ReadCoreFormat<T>(bytes, file.Settings);
+        RecordPhase(start, typeName, "import");
+        if (!imported.Ok)
+            return new Made(Result.Failure(notAsset + imported.Error), version);
 
+        // The waiters are told once it is imported; the entry reaches the disk meanwhile.
         if (cache is not null)
-            await Caches.WriteAsync(id, version, read.Value, cache, cancel).ConfigureAwait(false);
+        {
+            start = Metrics.AssetLoadDurations.Start();
+            KeepWriting(Caches.WriteAsync(id, version, imported.Value, cache, CancellationToken.None));
+            RecordPhase(start, typeName, "cache_write");
+        }
 
-        return await PreprocessAsync(id, version, read.Value, cancel).ConfigureAwait(false);
+        start = Metrics.AssetLoadDurations.Start();
+        Made preprocessed = await PreprocessAsync(id, version, imported.Value, cancel).ConfigureAwait(false);
+        RecordPhase(start, typeName, "preprocess");
+
+        return preprocessed;
+
+        async Task<Result<byte[]>> ReadSourceAsync()
+        {
+            long readStart = Metrics.AssetLoadDurations.Start();
+            Result<byte[]> read = await Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
+            if (read.Ok)
+            {
+                bytes = read.Value;
+                isRead = true;
+                RecordPhase(readStart, typeName, "read");
+            }
+
+            return read;
+        }
     }
+
+    private static void RecordPhase(long start, string type, string phase) =>
+        Metrics.AssetLoadDurations.RecordSince(
+            start,
+            new KeyValuePair<string, object?>(Metrics.TypeTag, type),
+            new KeyValuePair<string, object?>(Metrics.PhaseTag, phase)
+        );
 
     /// <summary>
     /// <paramref name="bytes"/> read as a <typeparamref name="T"/> by Core itself, with its <c>.meta</c>'s
@@ -1471,6 +1632,37 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
+    /// Lets <paramref name="write"/> of a cache entry finish on its own, and logs a failure once.
+    /// </summary>
+    private void KeepWriting(Task write)
+    {
+        _ = _writes.TryAdd(write, 0);
+        FinishAsync(write).FireAndForget();
+
+        async Task FinishAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            finally
+            {
+                _ = _writes.TryRemove(task, out _);
+            }
+        }
+    }
+
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD002:Avoid problematic synchronous waits",
+        Justification = "The host ends the run on its own thread, with no context to deadlock, and waits at most 5 s."
+    )]
+    private void WaitForWrites() =>
+        _ = Task.WhenAll(_writes.Keys)
+            .ContinueWith(static _ => { }, TaskScheduler.Default)
+            .Wait(TimeSpan.FromSeconds(5));
+
+    /// <summary>
     /// The version of the <typeparamref name="T"/> that a file's <paramref name="bytes"/> and
     /// <paramref name="settings"/> make with the type's importer now.
     /// </summary>
@@ -1489,10 +1681,13 @@ public sealed class AssetManager : IDisposable
     private async Task<Made> PreprocessAsync<T>(ulong id, ulong version, T asset, CancellationToken cancel)
         where T : IAsset<T>
     {
-        foreach (AssetPreprocessRun run in Loaded.Preprocessors.GetValueOrDefault(typeof(T), []))
-        {
-            await run(id, version, asset, cancel).ConfigureAwait(false);
-        }
+        // They only read the asset, so they run together.
+        ImmutableArray<AssetPreprocessRun> runs = Loaded.Preprocessors.GetValueOrDefault(typeof(T), []);
+        if (runs.Length == 1)
+            await runs[0](id, version, asset, cancel).ConfigureAwait(false);
+        else if (runs.Length > 1)
+            await Task.WhenAll(runs.Select(run => Task.Run(() => run(id, version, asset, cancel), cancel)))
+                .ConfigureAwait(false);
 
         return new Made(Result.Success<object>(asset), version, AssetScan.FindHandles(asset));
     }

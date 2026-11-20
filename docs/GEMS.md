@@ -34,8 +34,8 @@ Magic's own commands are. Reference the package in the csproj of the gem with
 `PrivateAssets="all" ExcludeAssets="runtime"`, so that the gem builds against it and runs on the copy that Magic
 loaded.
 
-Give a subject or a command a name that Magic's own do not have. It joins the console before the next line is
-parsed, and stays to the end of the run.
+Give a subject or a command a name that Magic's own do not have. The one exception is `save`: a gem's `save` takes the
+subcommand `settings` of Magic's. It joins the console before the next line is parsed, and stays to the end of the run.
 
 To let `set` and `query` reach the properties of a part, put `[CliPath]` on the class of the part, or on an
 interface that the part provides:
@@ -129,10 +129,11 @@ How a script runs:
 
 What a save and a restart keep:
 
-- Each save writes the state of every copy that runs into its slot: its values, by the name a prefab gives them, and
-  the other fields that it keeps for itself, by name. Left out are the fields that a copy gets again when it is made:
-  its entity, a thing that its constructor is handed, a service that a gem gives, a delegate, a task and a
-  disposable. A member that JSON cannot hold, or whose getter throws, goes to the log, and a copy from the save starts over without it.
+- Each save, which [the save gem](#savefiles) writes, holds the state of every copy that runs, in its slot: its
+  values, by the name a prefab gives them, and the other fields that it keeps for itself, by name. Left out are the
+  fields that a copy gets again when it is made: its entity, a thing that its constructor is handed, a service that a
+  gem gives, a delegate, a task and a disposable. A member that JSON cannot hold, or whose getter throws, goes to the
+  log, and a copy from the save starts over without it.
 - A copy that a save made takes that state up and goes on from it: its slot is marked `started`, so the gem sets the
   saved properties and fields on it and calls `Resume` in place of `Start`. A spawner spawns once, and a light keeps
   the depth that it had.
@@ -160,6 +161,22 @@ Reads `.prefab` files into prefabs, and writes a prefab as a `.prefab` file. Pro
   goes without that component.
 - If a prefab that a file names does not load, the file fails.
 - When a prefab that a file names changes, the importer reads the file again.
+
+### SaveFiles
+
+Writes the saves of the game as files, and reads them. Provides `ISaveSerializer`. It adds `save <name>` and `load <name>`
+to the console ([CLI](CLI.md#the-run)).
+
+- A save is the open domains and what the world changed in them: only the components that differ from what the files
+  of the domains make. It names the types of its components and holds no instance. A restart of the run keeps the
+  world through the same serializer.
+- A save file starts with a header: the bytes `MSAV` and the version of the format. A file that has another version, or
+  no header, is refused, and the log tells why.
+- A save is `Magic/<project>/Saves/<name>.save` under the local application data of the user.
+- Core holds only the seam: it takes the snapshot of the world and has the serializer write it, while the script state
+  that the snapshot refers to cannot free. Without this gem, the console has no `save <name>` or `load <name>`, and a
+  restart of the run keeps no world state: the log says so and the entry point opens again.
+- Format changes are a new version. Old saves do not load.
 
 ### AssimpModelImporter
 

@@ -176,72 +176,49 @@ public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
             total += levelBytes;
         }
 
-        // Each level is scaled from the one above, which is then freed, and stored as it is or as BC7 blocks. A surface SDL
+        // Each level is scaled from the one above. An uncompressed level is copied at once. The surfaces of a
+        // compressed chain stay until all its blocks are encoded, so that one loop can encode them all. A surface SDL
         // made by converting or scaling needs no lock to be read.
         ImmutableArray<TextureLevel> levels = table.MoveToImmutable();
         byte[] pixels = GC.AllocateUninitializedArray<byte>(total);
+        SDL_Surface*[] surfaces = new SDL_Surface*[count];
+        surfaces[0] = surface;
         for (int i = 0; i < count; i++)
         {
             TextureLevel level = levels[i];
             if (i > 0)
             {
-                SDL_Surface* above = surface;
-                surface = SDL_ScaleSurface(above, level.Width, level.Height, SDL_SCALEMODE_LINEAR);
-                SDL_DestroySurface(above);
-                if (surface == null)
+                surfaces[i] = SDL_ScaleSurface(surfaces[i - 1], level.Width, level.Height, SDL_SCALEMODE_LINEAR);
+                if (surfaces[i] == null)
+                {
+                    DestroyAll(surfaces);
                     return Result.Failure($"{file.Path} did not scale to mip {i}: {Sdl.Error}");
+                }
             }
 
-            byte* source = (byte*)surface->pixels;
-            int pitch = surface->pitch;
-            if (!isCompressed)
-            {
-                // SDL pads each row to its pitch; here they are packed tight.
-                int row = level.Width * TexelBytes;
-                for (int y = 0; y < level.Height; y++)
-                {
-                    new ReadOnlySpan<byte>(source + (y * pitch), row).CopyTo(
-                        pixels.AsSpan(level.Offset + (y * row), row)
-                    );
-                }
-
+            if (isCompressed)
                 continue;
+
+            // SDL pads each row to its pitch; here they are packed tight. The level above is not needed again.
+            byte* source = (byte*)surfaces[i]->pixels;
+            int row = level.Width * TexelBytes;
+            for (int y = 0; y < level.Height; y++)
+            {
+                new ReadOnlySpan<byte>(source + (y * surfaces[i]->pitch), row).CopyTo(
+                    pixels.AsSpan(level.Offset + (y * row), row)
+                );
             }
 
-            // Each row of blocks on a worker; a block past the level's edge repeats its last texels.
-            int columns = GetBlocks(level.Width);
-            Parallel.For(
-                0,
-                GetBlocks(level.Height),
-                row =>
-                {
-                    bc7enc_compress_block_params options = _blockOptions;
-                    uint* block = stackalloc uint[BlockTexels * BlockTexels];
-                    for (int column = 0; column < columns; column++)
-                    {
-                        for (int y = 0; y < BlockTexels; y++)
-                        {
-                            uint* from = (uint*)(
-                                source + (Math.Min((row * BlockTexels) + y, level.Height - 1) * pitch)
-                            );
-                            for (int x = 0; x < BlockTexels; x++)
-                            {
-                                block[(y * BlockTexels) + x] = from[
-                                    Math.Min((column * BlockTexels) + x, level.Width - 1)
-                                ];
-                            }
-                        }
-
-                        fixed (byte* to = &pixels[level.Offset + (((row * columns) + column) * BlockBytes)])
-                        {
-                            bc7enc_compress_block(to, (byte*)block, &options);
-                        }
-                    }
-                }
-            );
+            if (i > 0)
+            {
+                SDL_DestroySurface(surfaces[i - 1]);
+                surfaces[i - 1] = null;
+            }
         }
 
-        SDL_DestroySurface(surface);
+        if (isCompressed)
+            EncodeBlocks(surfaces, levels, pixels);
+        DestroyAll(surfaces);
 
         return Result.Success(
             new Texture
@@ -265,6 +242,71 @@ public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
                 Size = size,
             }
         );
+    }
+
+    /// <summary>
+    /// Packs the rows of blocks of every level in one loop, not one loop for each level, so that small levels cost no loop of their own.
+    /// A block past a level's edge repeats its last texels.
+    /// </summary>
+    private static void EncodeBlocks(SDL_Surface*[] surfaces, ImmutableArray<TextureLevel> levels, byte[] pixels)
+    {
+        // The rows of block of each level, counted from the first level's.
+        int[] firstRows = new int[levels.Length + 1];
+        for (int i = 0; i < levels.Length; i++)
+            firstRows[i + 1] = firstRows[i] + GetBlocks(levels[i].Height);
+
+        fixed (byte* output = pixels)
+        {
+            byte* start = output;
+            Parallel.For(
+                0,
+                firstRows[^1],
+                index =>
+                {
+                    int i = 0;
+                    while (index >= firstRows[i + 1])
+                        i++;
+
+                    TextureLevel level = levels[i];
+                    byte* source = (byte*)surfaces[i]->pixels;
+                    int pitch = surfaces[i]->pitch;
+                    int row = index - firstRows[i];
+                    int columns = GetBlocks(level.Width);
+                    bc7enc_compress_block_params options = _blockOptions;
+                    uint* block = stackalloc uint[BlockTexels * BlockTexels];
+                    for (int column = 0; column < columns; column++)
+                    {
+                        for (int y = 0; y < BlockTexels; y++)
+                        {
+                            uint* from = (uint*)(
+                                source + (Math.Min((row * BlockTexels) + y, level.Height - 1) * pitch)
+                            );
+                            for (int x = 0; x < BlockTexels; x++)
+                            {
+                                block[(y * BlockTexels) + x] = from[
+                                    Math.Min((column * BlockTexels) + x, level.Width - 1)
+                                ];
+                            }
+                        }
+
+                        bc7enc_compress_block(
+                            start + level.Offset + (((row * columns) + column) * BlockBytes),
+                            (byte*)block,
+                            &options
+                        );
+                    }
+                }
+            );
+        }
+    }
+
+    private static void DestroyAll(SDL_Surface*[] surfaces)
+    {
+        foreach (SDL_Surface* surface in surfaces)
+        {
+            if (surface != null)
+                SDL_DestroySurface(surface);
+        }
     }
 
     /// <summary>

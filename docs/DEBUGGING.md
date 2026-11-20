@@ -361,3 +361,5 @@ Where a measurement shows in the stats window:
 
 The console command `query stats [category] --every <seconds>` of Core logs the instruments as text, each so many seconds. It works
 with or without the debug tools gem. For example, `query stats gpu --every 30` logs the instruments with `gpu` in their name.
+`query stats load` prints the load instruments, such as the time of each phase of an asset load and of a world load, summed since
+the process started.
