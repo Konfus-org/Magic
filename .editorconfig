@@ -249,12 +249,16 @@ dotnet_diagnostic.VSTHRD003.severity = none
 # Banned APIs (BannedSymbols.txt): what the standards say to use instead
 dotnet_diagnostic.RS0030.severity = warning
 
-# The house rules (tools/Analyzers): members in order (MG0001, CODESTANDARDS Type layout) and no null-forgiving !
-# (MG0002, CODESTANDARDS Null). The analyzer ships its fix in its own assembly: the compiler makes only the rules, by
-# attribute, and the editor and dotnet format, which make the fix, bring the Workspaces it needs.
+# The house rules (tools/Analyzers): members in order (MG0001, CODESTANDARDS Type layout), no null-forgiving !
+# (MG0002, CODESTANDARDS Null) and disposable fields disposed (MG0003, CODESTANDARDS Classes). The analyzer ships its
+# fix in its own assembly: the compiler makes only the rules, by attribute, and the editor and dotnet format, which
+# make the fix, bring the Workspaces it needs.
 dotnet_diagnostic.MG0001.severity = warning
 dotnet_diagnostic.MG0002.severity = warning
+dotnet_diagnostic.MG0003.severity = warning
 dotnet_diagnostic.RS1038.severity = none
+# Magic.Analyzers' MG0003 checks this, and also sees Disposable.Track.
+dotnet_diagnostic.CA2213.severity = none
 
 # Code-quality rules that are off
 # Magic is used from C#: CLS compliance, other languages' keywords (End, Stop, Error) and named methods beside

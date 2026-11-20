@@ -5,6 +5,7 @@ using Magic.Graphics;
 using Magic.Platform;
 using Magic.Projects;
 using Magic.Threading;
+using Magic.Utils;
 
 namespace Magic.VulkanGraphics;
 
@@ -12,7 +13,7 @@ namespace Magic.VulkanGraphics;
 /// The gem: it makes the <see cref="GraphicsApi"/> over its <see cref="Settings"/>, adds the <c>gpu</c> subject of
 /// <c>query</c>, which prints the GPU that draws, and gives the graphics API each RenderDoc capture asked for.
 /// </summary>
-public sealed class EntryPoint : IGem, IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
     public EntryPoint(
         VulkanGraphicsSettings settings,
@@ -26,6 +27,8 @@ public sealed class EntryPoint : IGem, IDisposable
     {
         Settings = settings;
         GraphicsApi = new(settings, app, threads, compiler, caches, window);
+        Track(GraphicsApi);
+
         commands.RegisterQuery(
             "gpu",
             "Prints the GPU that draws: its name, its kind, its driver, the API, its memory and whether the API validates",
@@ -39,8 +42,6 @@ public sealed class EntryPoint : IGem, IDisposable
     public VulkanGraphicsSettings Settings { get; }
 
     public GraphicsApi GraphicsApi { get; }
-
-    public void Dispose() => GraphicsApi.Dispose();
 
     public void Update(in Frame frame)
     {

@@ -50,6 +50,7 @@ public sealed class Caches
     private readonly IFileSystem _files;
 
     private readonly App _app;
+
     private Project? _project;
 
     internal Caches(IFileSystem files, App app)
@@ -136,6 +137,30 @@ public sealed class Caches
     }
 
     /// <summary>
+    /// Keeps <paramref name="value"/> as what is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made
+    /// from <paramref name="version"/>, in place of what was there.
+    /// </summary>
+    /// <remarks>
+    /// A reader, or the next run after a crash, never finds half an entry. When it cannot keep the entry, it logs a
+    /// warning, and the entry is made again next time.
+    /// </remarks>
+    public async Task WriteAsync<T>(ulong key, ulong version, T value, ICache<T> cache, CancellationToken cancel)
+    {
+        // The versions, then what the type's cache writes.
+        ArrayBufferWriter<byte> entry = new();
+        Span<byte> header = entry.GetSpan(HeaderSize);
+        BinaryPrimitives.WriteUInt64LittleEndian(header, version);
+        BinaryPrimitives.WriteInt32LittleEndian(header[sizeof(ulong)..], cache.Version);
+        entry.Advance(HeaderSize);
+        cache.Write(value, entry);
+
+        string file = GetEntryFile<T>(UserCacheFolder, key);
+        Result written = await WriteFileAsync(file, entry.WrittenMemory, cancel).ConfigureAwait(false);
+        if (!written.Ok)
+            Log.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
+    }
+
+    /// <summary>
     /// Deletes each entry in this user's cache folders that no run read or wrote for 30 days, for every project, then
     /// each folder that holds no entry.
     /// </summary>
@@ -144,7 +169,7 @@ public sealed class Caches
     /// The cache folder a project brings with it is never swept. An entry that another run reads as it goes is only
     /// made again. Any thread.
     /// </remarks>
-    public void Sweep()
+    internal void Sweep()
     {
         if (!_files.DirectoryExists(UserCacheRoot))
             return;
@@ -180,30 +205,6 @@ public sealed class Caches
 
             _ = _files.Delete(project);
         }
-    }
-
-    /// <summary>
-    /// Keeps <paramref name="value"/> as what is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made
-    /// from <paramref name="version"/>, in place of what was there.
-    /// </summary>
-    /// <remarks>
-    /// A reader, or the next run after a crash, never finds half an entry. When it cannot keep the entry, it logs a
-    /// warning, and the entry is made again next time.
-    /// </remarks>
-    public async Task WriteAsync<T>(ulong key, ulong version, T value, ICache<T> cache, CancellationToken cancel)
-    {
-        // The versions, then what the type's cache writes.
-        ArrayBufferWriter<byte> entry = new();
-        Span<byte> header = entry.GetSpan(HeaderSize);
-        BinaryPrimitives.WriteUInt64LittleEndian(header, version);
-        BinaryPrimitives.WriteInt32LittleEndian(header[sizeof(ulong)..], cache.Version);
-        entry.Advance(HeaderSize);
-        cache.Write(value, entry);
-
-        string file = GetEntryFile<T>(UserCacheFolder, key);
-        Result written = await WriteFileAsync(file, entry.WrittenMemory, cancel).ConfigureAwait(false);
-        if (!written.Ok)
-            Log.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
     }
 
     /// <summary>

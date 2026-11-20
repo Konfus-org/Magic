@@ -48,7 +48,7 @@ internal sealed class Cover(AssetManager assets, IGraphicsApi gpu)
     /// With no light (null), the renderer's white sun lights the open default sky, which shows bright, so the cover
     /// is off-white.
     /// </remarks>
-    public void PickColor((Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun)
+    internal void PickColor((Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun)
     {
         bool isDay =
             sun is not { } light
@@ -59,12 +59,12 @@ internal sealed class Cover(AssetManager assets, IGraphicsApi gpu)
     /// <summary>
     /// Makes the cover black until the next <see cref="PickColor"/>.
     /// </summary>
-    public void MakeBlack() => _color = Vector3.Zero;
+    internal void MakeBlack() => _color = Vector3.Zero;
 
     /// <summary>
     /// Gets whether a shader of the cover is still being built; a failed one counts as done.
     /// </summary>
-    public bool IsLoading() => gpu.IsAnyLoading(_shaders.Vertex, _shaders.Pixel);
+    internal bool IsLoading() => gpu.IsAnyLoading(_shaders.Vertex, _shaders.Pixel);
 
     /// <summary>
     /// Records the cover over the window at <paramref name="opacity"/>, which the shader makes even to the eye.
@@ -72,7 +72,7 @@ internal sealed class Cover(AssetManager assets, IGraphicsApi gpu)
     /// <remarks>
     /// It asks for its shaders each frame, at any opacity, so they are built before the first fade.
     /// </remarks>
-    public void Record(in RenderFrame frame, RenderGraph graph, float opacity)
+    internal void Record(in RenderFrame frame, RenderGraph graph, float opacity)
     {
         GpuState shaders = gpu.GetState(_shaders.Vertex, _shaders.Pixel);
         if (shaders == GpuState.Failed)

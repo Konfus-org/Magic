@@ -12,14 +12,22 @@ namespace Magic.Utils;
     "CA1710:Identifiers should have correct suffix",
     Justification = "Named for what it holds, as Subscription is; it is a list only so it can be built like one."
 )]
-public sealed class Subscriptions : IDisposable, IEnumerable<Subscription>
+public sealed class Subscriptions : Disposable, IEnumerable<Subscription>
 {
     private readonly List<Subscription> _all = [];
 
     /// <summary>
-    /// Ends every subscription held, last added first, and holds none after.
+    /// Makes an empty list of subscriptions. Dispose it to end each one held, last added first, and hold none after.
     /// </summary>
-    public void Dispose()
+    public Subscriptions() => Track(End);
+
+    public IEnumerator<Subscription> GetEnumerator() => _all.GetEnumerator();
+
+    public void Add(Subscription subscription) => _all.Add(subscription);
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private void End()
     {
         for (int i = _all.Count - 1; i >= 0; i--)
         {
@@ -28,10 +36,4 @@ public sealed class Subscriptions : IDisposable, IEnumerable<Subscription>
 
         _all.Clear();
     }
-
-    public void Add(Subscription subscription) => _all.Add(subscription);
-
-    public IEnumerator<Subscription> GetEnumerator() => _all.GetEnumerator();
-
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

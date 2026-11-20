@@ -17,7 +17,7 @@ namespace Magic.VulkanGraphics;
 /// It picks the fastest GPU that has every baseline feature of IGraphicsApi and can show the window, and records which
 /// optional features it has. If no GPU fits, the constructor throws, because the gem cannot run without one.
 /// </remarks>
-internal sealed unsafe class VulkanDevice : IDisposable
+internal sealed unsafe class VulkanDevice : Disposable
 {
     private const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
 
@@ -220,20 +220,6 @@ internal sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     public bool HasFullScreenExclusive { get; }
 
-    public void Dispose()
-    {
-        Api.vkDeviceWaitIdle();
-        Api.vkDestroyDevice();
-        if (Surface.IsNotNull)
-            InstanceApi.vkDestroySurfaceKHR(Surface);
-
-        if (_messenger.IsNotNull)
-            InstanceApi.vkDestroyDebugUtilsMessengerEXT(_messenger);
-
-        InstanceApi.vkDestroyInstance();
-        vkShutdown();
-    }
-
     /// <summary>
     /// Finds a memory type among <paramref name="typeBits"/> that has <paramref name="wanted"/>; -1 when none.
     /// </summary>
@@ -270,6 +256,25 @@ internal sealed unsafe class VulkanDevice : IDisposable
         }
 
         return bytes;
+    }
+
+    // Not tracked: wait idle first, then the device, the surface, the messenger and the instance, in that order.
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        Api.vkDeviceWaitIdle();
+        Api.vkDestroyDevice();
+        if (Surface.IsNotNull)
+            InstanceApi.vkDestroySurfaceKHR(Surface);
+
+        if (_messenger.IsNotNull)
+            InstanceApi.vkDestroyDebugUtilsMessengerEXT(_messenger);
+
+        InstanceApi.vkDestroyInstance();
+        vkShutdown();
+        base.Dispose(disposing);
     }
 
     [UnmanagedCallersOnly]

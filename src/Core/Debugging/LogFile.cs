@@ -15,7 +15,7 @@ namespace Magic.Debugging;
 /// detailed. Each line is on disk as soon as it is logged, so a run that is killed keeps its log. The folder keeps
 /// the files of the last runs, and the oldest go as a new one is made.
 /// </remarks>
-internal sealed class LogFile : ILogSink, IDisposable
+internal sealed class LogFile : Disposable, ILogSink
 {
     /// <summary>
     /// How many log files the folder keeps, this run's among them.
@@ -24,7 +24,7 @@ internal sealed class LogFile : ILogSink, IDisposable
 
     private readonly StreamWriter _writer;
 
-    private LogFile(StreamWriter writer) => _writer = writer;
+    private LogFile(StreamWriter writer) => _writer = Track(writer);
 
     /// <summary>
     /// Starts the log file of this process and gives its path to <see cref="Log.FilePath"/>, until the subscription
@@ -77,8 +77,6 @@ internal sealed class LogFile : ILogSink, IDisposable
             file.Dispose();
         });
     }
-
-    public void Dispose() => _writer.Dispose();
 
     public void Write(in Log.Line line) => _writer.WriteLine(line.ToString());
 

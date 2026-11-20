@@ -2,20 +2,22 @@ using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Input;
 using Magic.Projects;
+using Magic.Utils;
 
 namespace Magic.DebugTools;
 
 /// <summary>
 /// The gem: it makes <see cref="DebugWindows"/> over its <see cref="Settings"/> and draws them each frame.
 /// </summary>
-public sealed class EntryPoint : IGem, IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
     private readonly DebugWindows _debugWindows;
 
     public EntryPoint(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input = null)
     {
         Settings = settings;
-        _debugWindows = new(settings, Windows, allSettings, ui, input);
+        _debugWindows = new DebugWindows(settings, Windows, allSettings, ui, input);
+        Track(_debugWindows);
     }
 
     /// <summary>
@@ -27,8 +29,6 @@ public sealed class EntryPoint : IGem, IDisposable
     /// Which lines and windows show, which the keys, the windows' close buttons and the console set. Game thread.
     /// </summary>
     public OpenWindows Windows { get; } = new();
-
-    public void Dispose() => _debugWindows.Dispose();
 
     public void Update(in Frame frame) => _debugWindows.Update();
 

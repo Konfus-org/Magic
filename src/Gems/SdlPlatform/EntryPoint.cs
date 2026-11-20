@@ -2,6 +2,7 @@ using Magic.Assets;
 using Magic.Files;
 using Magic.Projects;
 using Magic.Threading;
+using Magic.Utils;
 using Magic.Worlds;
 
 namespace Magic.SdlPlatform;
@@ -13,10 +14,8 @@ namespace Magic.SdlPlatform;
 /// The platform thread, which is the process's first thread, makes it, because SDL's windows and events belong to that
 /// thread. Each frame, <see cref="Update"/> lets the window pace the frame, then makes the input the frame's input.
 /// </remarks>
-public sealed class EntryPoint : IGem, IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
-    private readonly SdlWindow _sdl;
-
     public EntryPoint(
         SdlPlatformSettings settings,
         App app,
@@ -27,11 +26,15 @@ public sealed class EntryPoint : IGem, IDisposable
     )
     {
         Settings = settings;
-        _sdl = new SdlWindow(settings, app.WindowName, app.IsHeadless);
-        Window = new Window(_sdl, settings, app.WindowName, app, threads, assets);
-        Clipboard = new Clipboard(_sdl, threads);
-        Input = new Input(_sdl, settings, app, world);
-        Platform = new Platform(_sdl, files);
+        // Tracked in creation order, so SDL ends last, after the input and platform.
+        SdlWindow sdl = new(settings, app.WindowName, app.IsHeadless);
+        Track(sdl);
+        Window = new Window(sdl, settings, app.WindowName, app, threads, assets);
+        Clipboard = new Clipboard(sdl, threads);
+        Input = new Input(sdl, settings, app, world);
+        Track(Input);
+        Platform = new Platform(sdl, files);
+        Track(Platform);
     }
 
     /// <summary>
@@ -49,13 +52,6 @@ public sealed class EntryPoint : IGem, IDisposable
     public Input Input { get; }
 
     public Platform Platform { get; }
-
-    public void Dispose()
-    {
-        Platform.Dispose();
-        Input.Dispose();
-        _sdl.Dispose();
-    }
 
     public void Update(in Frame frame)
     {

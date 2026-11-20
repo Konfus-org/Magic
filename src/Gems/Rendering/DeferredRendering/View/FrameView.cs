@@ -29,7 +29,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
     /// <summary>
     /// The rows the last <see cref="Upload"/> wrote.
     /// </summary>
-    public FrameConstants Constants { get; private set; }
+    internal FrameConstants Constants { get; private set; }
 
     /// <summary>
     /// Gets the jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle.
@@ -38,7 +38,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
     /// It is a point in the pixel from the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an
     /// effect that blends frames sees another point of each pixel each frame.
     /// </remarks>
-    public static Vector2 GetJitter(uint frameIndex)
+    internal static Vector2 GetJitter(uint frameIndex)
     {
         uint term = (frameIndex % JitterFrames) + 1;
 
@@ -49,7 +49,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
     /// Forgets the last frame's camera and size, so the next frame moves nothing on from where a view that is gone
     /// looked, and each gem that keeps a history of the view starts it again.
     /// </summary>
-    public void ClearHistory() => _previous = null;
+    internal void ClearHistory() => _previous = null;
 
     /// <summary>
     /// Uploads the frame's rows into its buffer.
@@ -61,7 +61,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
     /// <paramref name="skyBrightness"/>, the sampler of the sky's tables, and the light table's lights and its tiles;
     /// the world as rays see it, <paramref name="traced"/>; and, at 0, the rows the gems after the view write.
     /// </remarks>
-    public Result Upload(
+    internal Result Upload(
         RenderGraph graph,
         in GpuView view,
         in GpuWorld world,
@@ -169,7 +169,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
     /// <summary>
     /// Whether the last frame drew the view at this size: targets made again at another hold nothing of it.
     /// </summary>
-    public bool HasHistory(int width, int height) =>
+    internal bool HasHistory(int width, int height) =>
         _previous is { } last && last.Width == width && last.Height == height;
 
     /// <summary>

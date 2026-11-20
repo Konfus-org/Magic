@@ -77,7 +77,7 @@ internal sealed class ClusterPasses
     /// </summary>
     private readonly List<ShaderEntry> _resolveShaders = [];
 
-    public ClusterPasses(AssetManager assets, IGraphicsApi gpu)
+    internal ClusterPasses(AssetManager assets, IGraphicsApi gpu)
     {
         _gpu = gpu;
         _budgetShader = PassShaders.GetEntry(assets, "BudgetClusters", "BudgetClusters");
@@ -143,7 +143,7 @@ internal sealed class ClusterPasses
         ];
     }
 
-    public ImmutableArray<ShaderEntry> Shaders { get; }
+    internal ImmutableArray<ShaderEntry> Shaders { get; }
 
     /// <summary>
     /// Asks for the cull's buffers and the cluster targets, uploads the cluster constants, then records the passes.
@@ -153,7 +153,7 @@ internal sealed class ClusterPasses
     /// budget, draw the main view twice, what last frame's pyramid shows, then what it hid and this frame's shows, draw
     /// the nearest glass in front of it into the glass's buffer, and resolve every pixel's material into the GBuffer.
     /// </remarks>
-    public Result Record(
+    internal Result Record(
         in RenderFrame frame,
         RenderGraph graph,
         GpuView gpu,
@@ -472,7 +472,7 @@ internal sealed class ClusterPasses
     /// <summary>
     /// Gets the resolve entry for each of <paramref name="materialShaders"/>, and makes one for each newly numbered.
     /// </summary>
-    public ReadOnlySpan<ShaderEntry> GetResolveShaders(IReadOnlyList<ShaderTypeArgument> materialShaders)
+    internal ReadOnlySpan<ShaderEntry> GetResolveShaders(IReadOnlyList<ShaderTypeArgument> materialShaders)
     {
         for (int shader = _resolveShaders.Count; shader < materialShaders.Count; shader++)
         {

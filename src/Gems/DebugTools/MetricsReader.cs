@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using Magic.Utils;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 
@@ -72,7 +73,7 @@ internal readonly record struct MetricRow(
 /// Measurements sum up on the thread that records them, without locks or allocation. <see cref="Collect"/> hands them
 /// over on the game thread. It listens only between <see cref="Listen"/> on and off.
 /// </remarks>
-internal sealed class MetricsReader : IDisposable
+internal sealed class MetricsReader : Disposable
 {
     private static readonly string[] _meters = ["Magic.*", "System.Runtime"];
 
@@ -83,7 +84,7 @@ internal sealed class MetricsReader : IDisposable
 
     private MeterProvider? _provider;
 
-    public void Dispose() => Listen(false);
+    public MetricsReader() => Track(() => Listen(false));
 
     /// <summary>
     /// Starts or stops listening. Stopped, it forgets what it measured.

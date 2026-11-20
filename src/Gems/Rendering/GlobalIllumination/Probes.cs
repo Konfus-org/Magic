@@ -82,16 +82,16 @@ internal sealed class Probes(AssetManager assets, IGraphicsApi gpu)
     /// <summary>
     /// The trace's entry, generic over the sky, which the renderer specialises on the frame's sky.
     /// </summary>
-    public ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes");
+    internal ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes");
 
-    public ImmutableArray<ShaderEntry> Shaders =>
+    internal ImmutableArray<ShaderEntry> Shaders =>
         [_askShader, _planShader, _listShader, _blendShader, _clearLightsShader, _binLightsShader];
 
     /// <summary>
     /// The frames that a grid with cascades of <paramref name="size"/> takes to give each of its probes its first rays,
     /// which are the most a probe traces.
     /// </summary>
-    public static int GetSweepFrames((int Across, int Up) size)
+    internal static int GetSweepFrames((int Across, int Up) size)
     {
         (int across, int up) = Clamp(size);
         long rays = (long)across * up * across * Cascades * MaxProbeRays;
@@ -107,7 +107,7 @@ internal sealed class Probes(AssetManager assets, IGraphicsApi gpu)
     /// The size goes from 2 probes a side up to the most, and the spacing from 0.1 metres. The probes start at none
     /// while they hold nothing or the size or spacing changed.
     /// </remarks>
-    public Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> Prepare(
+    internal Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> Prepare(
         in RenderFrame frame,
         RenderGraph graph,
         bool hasHistory,
@@ -190,7 +190,7 @@ internal sealed class Probes(AssetManager assets, IGraphicsApi gpu)
     /// frame starts at. The lights and the sky light the rays. First, each light is put into the cells of the light
     /// grid that its reach touches, which every ray reads.
     /// </remarks>
-    public void Record(in GIView view, in ProbeGridConstants grid, in ProbeUpdateConstants update)
+    internal void Record(in GIView view, in ProbeGridConstants grid, in ProbeUpdateConstants update)
     {
         RenderGraph graph = view.Graph;
         GpuConstants header = view.Header;

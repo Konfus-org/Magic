@@ -183,7 +183,7 @@ internal sealed class Slots<T>(uint capacity)
 /// waits as long.
 /// </remarks>
 internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap heap, VulkanPipelineCache pipelineCache)
-    : IDisposable
+    : Disposable
 {
     private const float LodClampNone = 1000;
 
@@ -206,35 +206,6 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     /// Bytes of device memory the resources hold now.
     /// </summary>
     public long MemoryBytes { get; private set; }
-
-    public void Dispose()
-    {
-        // Every resource still alive, whatever frame used it: the device is idle by now.
-        foreach (VulkanBuffer buffer in Buffers.Items)
-        {
-            Free(buffer);
-        }
-
-        foreach (VulkanTexture texture in Textures.Items)
-        {
-            Free(texture);
-        }
-
-        foreach (VkSampler? sampler in Samplers.Items)
-        {
-            device.Api.vkDestroySampler(sampler ?? VkSampler.Null);
-        }
-
-        foreach (VulkanAcceleration acceleration in Accelerations.Items)
-        {
-            Free(acceleration);
-        }
-
-        foreach (VulkanPipeline pipeline in Pipelines.Items)
-        {
-            Free(pipeline);
-        }
-    }
 
     /// <summary>
     /// Creates a bottom-level acceleration structure over triangles in the heap's buffers, and puts it in the heap for
@@ -753,6 +724,41 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         device.Api.vkCmdCopyAccelerationStructureKHR(cmd, &copy);
 
         return compacted;
+    }
+
+    // Not tracked: buffers, textures, samplers, acceleration structures, then pipelines.
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        // Every resource still alive, whatever frame used it: the device is idle by now.
+        foreach (VulkanBuffer buffer in Buffers.Items)
+        {
+            Free(buffer);
+        }
+
+        foreach (VulkanTexture texture in Textures.Items)
+        {
+            Free(texture);
+        }
+
+        foreach (VkSampler? sampler in Samplers.Items)
+        {
+            device.Api.vkDestroySampler(sampler ?? VkSampler.Null);
+        }
+
+        foreach (VulkanAcceleration acceleration in Accelerations.Items)
+        {
+            Free(acceleration);
+        }
+
+        foreach (VulkanPipeline pipeline in Pipelines.Items)
+        {
+            Free(pipeline);
+        }
+
+        base.Dispose(disposing);
     }
 
     private Result<VulkanBuffer> CreateVulkanBuffer(in BufferDescription description)

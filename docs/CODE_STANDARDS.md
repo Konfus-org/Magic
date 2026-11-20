@@ -45,9 +45,10 @@ things:
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
   needs. It is a `public sealed class EntryPoint` at the gem's root, and its parts.
-- `EntryPoint` implements only `IGem` and `IDisposable`. Its only state is its parts. It makes each part with `new` in
-  its constructor and exports it as a public get-only property. A private field or an `internal` class is not
-  exported. Its hooks call its parts, and `Dispose` ends them. A gem without hooks still has an `EntryPoint`.
+- `EntryPoint` implements `IGem` and derives from `Disposable`. Its only state is its parts. It makes each part with
+  `new` in its constructor, tracks each disposable part with `Track` when it makes it, and exports the part as a public
+  get-only property. A private field or an `internal` class is not exported. Its hooks call its parts. A gem without
+  hooks still has an `EntryPoint`.
 - A part is a class that does one job. Core sets up each exported part by the Core interfaces that the part
   implements. These interfaces say what the part does: it provides them to the gems that are made after it, it
   renders, it reads assets, or it is a window, platform, ECS or log sink. Name a part for its interface: `Renderer`,
@@ -176,11 +177,26 @@ things:
 
 ### Visibility
 
-- Public is only for what a gem or game script uses. Everything else is `internal` or private. Container and host
-  plumbing are never public, and nothing is public for a test's sake.
+- Public is for what a gem or game script uses, also when nothing calls it yet. Everything else is `internal` or
+  private. Container and host plumbing are never public, and nothing is public for a test's sake.
 - A type that only one gem uses lives in that gem, internal. Core holds the types that gems share.
 - Add an interface only to swap a gem or to reach outside the process (disk, GPU, window), never for a test.
 - No type that only forwards calls to another.
+- Give each type and member the lowest visibility that fits: private, then `internal`, then public.
+
+### Classes
+
+- A class is `sealed` by default. It is `abstract` or `static` when that is its job. Open a class only when a subclass
+  needs it.
+- A class that owns something to dispose derives from Core's `Disposable`. It calls `Track` on each disposable that it
+  owns and on each cleanup callback, in the order it makes them. `Disposable` runs them last first.
+- A disposable class disposes each disposable field or property that it makes with `new` (MG0003). In a
+  `Disposable`, the class passes the member to `Track`, or disposes it in a `Track` callback or in `Dispose(bool)`.
+  Another class disposes it in `Dispose` or `DisposeAsync`, or in a method of its own that these call. MG0003
+  replaces CA2213, which does not see `Track`.
+- Override `Dispose(bool disposing)` only for cleanup that `Track` cannot express, such as a wait or a teardown in a
+  fixed order. Start it with `if (IsDisposed) return;` and end it with `base.Dispose(disposing);`.
+- A struct that holds a disposable, such as `Subscription`, does not derive from `Disposable`.
 
 ### Folders and files
 

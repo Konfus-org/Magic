@@ -20,7 +20,7 @@ namespace Magic.SdlPlatform;
 /// SDL's windows and events belong to the process's first thread, the platform thread, which makes the gem.
 /// </para>
 /// </remarks>
-internal sealed unsafe class SdlWindow : IDisposable
+internal sealed unsafe class SdlWindow : Disposable
 {
     /// <summary>
     /// The window; null when headless.
@@ -82,6 +82,8 @@ internal sealed unsafe class SdlWindow : IDisposable
         if (!SDL_Init(systems))
             throw new InvalidOperationException($"SDL could not start: {Sdl.Error}");
 
+        // Tracked in creation order, so on disposal the Metal view goes first, then the window, then SDL.
+        Track(SDL_Quit);
         if (isHeadless)
             return;
 
@@ -130,8 +132,12 @@ internal sealed unsafe class SdlWindow : IDisposable
             throw new InvalidOperationException($"SDL could not open a window: {error}");
         }
 
+        Track(() => SDL_DestroyWindow(Pointer));
         if (OperatingSystem.IsMacOS())
+        {
             MetalView = SDL_Metal_CreateView(Pointer);
+            Track(() => SDL_Metal_DestroyView(MetalView));
+        }
 
         ReadSize();
         IsFocused = (SDL_GetWindowFlags(Pointer) & SDL_WINDOW_INPUT_FOCUS) != 0;
@@ -182,17 +188,6 @@ internal sealed unsafe class SdlWindow : IDisposable
     {
         if (!threads.IsCurrent(EngineThread.Game))
             throw new InvalidOperationException("The window and clipboard are the game thread's.");
-    }
-
-    public void Dispose()
-    {
-        if (MetalView != null)
-            SDL_Metal_DestroyView(MetalView);
-
-        if (Pointer != null)
-            SDL_DestroyWindow(Pointer);
-
-        SDL_Quit();
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ namespace Magic.Assets.Pipeline;
 /// <summary>
 /// Watches the asset directories, and reads them again for <paramref name="assets"/> once the changes settle.
 /// </summary>
-internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDisposable
+internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : Disposable
 {
     /// <summary>
     /// How long the files must have been left alone before their changes are taken in: an editor saving a file, or a
@@ -22,8 +22,6 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
     /// Held for what the watches saw and the worker on it, which a watch's thread and the worker share.
     /// </summary>
     private readonly Lock _gate = new();
-
-    private readonly Subscriptions _watchers = [];
 
     /// <summary>
     /// The paths the watches saw change, from their asset directories, not yet read. Under <see cref="_gate"/>.
@@ -41,8 +39,6 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
     /// </summary>
     private Task _reading = Task.CompletedTask;
 
-    public void Dispose() => _watchers.Dispose();
-
     /// <summary>
     /// Watches <paramref name="directory"/>. Failing to is a warning: a change there is not taken in.
     /// </summary>
@@ -58,7 +54,7 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
             return;
         }
 
-        _watchers.Add(new Subscription(watched.Value.Dispose));
+        _ = Track(watched.Value);
     }
 
     /// <summary>

@@ -14,8 +14,7 @@ namespace Magic.VulkanGraphics;
 /// they are out of date. A frame takes an image with <see cref="Acquire"/> and gives it back with
 /// <see cref="Present"/>.
 /// </remarks>
-internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResources resources, IWindow window)
-    : IDisposable
+internal sealed unsafe class VulkanSwapchain : Disposable
 {
     /// <summary>
     /// How frames reach the window without waiting for the display, most wanted first: immediate, which can tear, else
@@ -24,20 +23,38 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     /// </summary>
     private static readonly VkPresentModeKHR[] _unsyncedModes = [VkPresentModeKHR.Immediate, VkPresentModeKHR.Mailbox];
 
+    private readonly VulkanDevice _device;
+
+    private readonly VulkanResources _resources;
+
+    private readonly IWindow _window;
+
     private VkSwapchainKHR _swapchain = VkSwapchainKHR.Null;
+
     private GpuTexture[] _textures = [];
+
     private VkSemaphore[] _rendered = [];
+
     private int _width;
+
     private int _height;
+
     private bool _isVSyncOn;
+
     private int _acquired = -1;
+
+    public VulkanSwapchain(VulkanDevice device, VulkanResources resources, IWindow window)
+    {
+        _device = device;
+        _resources = resources;
+        _window = window;
+        Track(Destroy);
+    }
 
     /// <summary>
     /// Signalled when the current image is drawn, which presenting waits for.
     /// </summary>
     public VkSemaphore Rendered => _acquired < 0 ? VkSemaphore.Null : _rendered[_acquired];
-
-    public void Dispose() => Destroy();
 
     /// <summary>
     /// Takes the next image for a frame, remaking the images first when the window or <paramref name="isVSyncOn"/>
@@ -46,7 +63,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     public GpuTexture Acquire(VkSemaphore acquired, bool isVSyncOn)
     {
         _acquired = -1;
-        if (window.Width != _width || window.Height != _height || isVSyncOn != _isVSyncOn || _swapchain.IsNull)
+        if (_window.Width != _width || _window.Height != _height || isVSyncOn != _isVSyncOn || _swapchain.IsNull)
         {
             _isVSyncOn = isVSyncOn;
             Recreate();
@@ -56,14 +73,14 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             return GpuTexture.None;
 
         uint index;
-        VkResult result = device.Api.vkAcquireNextImageKHR(_swapchain, ulong.MaxValue, acquired, VkFence.Null, &index);
+        VkResult result = _device.Api.vkAcquireNextImageKHR(_swapchain, ulong.MaxValue, acquired, VkFence.Null, &index);
         if (result == VkResult.ErrorOutOfDateKHR)
         {
             Recreate();
             if (_swapchain.IsNull)
                 return GpuTexture.None;
 
-            result = device.Api.vkAcquireNextImageKHR(_swapchain, ulong.MaxValue, acquired, VkFence.Null, &index);
+            result = _device.Api.vkAcquireNextImageKHR(_swapchain, ulong.MaxValue, acquired, VkFence.Null, &index);
         }
 
         if (result is not (VkResult.Success or VkResult.SuboptimalKHR))
@@ -75,7 +92,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
 
         _acquired = (int)index;
         // What the image held is gone with the last present: it is drawn into from nothing.
-        if (resources.Textures[_textures[_acquired].Id] is { } texture)
+        if (_resources.Textures[_textures[_acquired].Id] is { } texture)
             texture.Accesses[0] = GpuAccess.None;
 
         return _textures[_acquired];
@@ -89,7 +106,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         if (_acquired < 0)
             return;
 
-        VkResult result = device.Api.vkQueuePresentKHR(device.Queue, Rendered, _swapchain, (uint)_acquired);
+        VkResult result = _device.Api.vkQueuePresentKHR(_device.Queue, Rendered, _swapchain, (uint)_acquired);
         _acquired = -1;
         if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
             _width = -1;
@@ -102,19 +119,19 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         if (_swapchain.IsNull)
             return;
 
-        device.Api.vkDeviceWaitIdle();
+        _device.Api.vkDeviceWaitIdle();
         foreach (GpuTexture texture in _textures)
         {
-            if (resources.Textures.Remove(texture.Id) is { } removed)
-                resources.Free(new(texture.Id, removed));
+            if (_resources.Textures.Remove(texture.Id) is { } removed)
+                _resources.Free(new(texture.Id, removed));
         }
 
         foreach (VkSemaphore semaphore in _rendered)
         {
-            device.Api.vkDestroySemaphore(semaphore);
+            _device.Api.vkDestroySemaphore(semaphore);
         }
 
-        device.Api.vkDestroySwapchainKHR(_swapchain);
+        _device.Api.vkDestroySwapchainKHR(_swapchain);
         _swapchain = VkSwapchainKHR.Null;
         _textures = [];
         _rendered = [];
@@ -123,11 +140,11 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     private void Recreate()
     {
         Destroy();
-        _width = window.Width;
-        _height = window.Height;
-        VkSurfaceKHR surface = device.Surface;
-        device.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-            device.PhysicalDevice,
+        _width = _window.Width;
+        _height = _window.Height;
+        VkSurfaceKHR surface = _device.Surface;
+        _device.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+            _device.PhysicalDevice,
             surface,
             out VkSurfaceCapabilitiesKHR capabilities
         );
@@ -149,13 +166,13 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             return;
 
         VkSurfaceFormatKHR format = PickFormat(surface);
-        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(
-            device.PhysicalDevice,
+        _device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(
+            _device.PhysicalDevice,
             surface,
             out uint modeCount
         );
         VkPresentModeKHR[] modes = new VkPresentModeKHR[modeCount];
-        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, modes);
+        _device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(_device.PhysicalDevice, surface, modes);
         // Each image is as big as the window, so there are as few as the surface takes: two at least, one drawn while
         // the other is shown, and one more for mailbox to queue a drawn image while one is shown.
         VkPresentModeKHR presentMode = PickPresentMode(modes);
@@ -186,10 +203,10 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         {
             fullScreenExclusive = VkFullScreenExclusiveEXT.Disallowed,
         };
-        if (device.HasFullScreenExclusive)
+        if (_device.HasFullScreenExclusive)
             createInfo.pNext = &notExclusive;
 
-        VkResult result = device.Api.vkCreateSwapchainKHR(&createInfo, out VkSwapchainKHR swapchain);
+        VkResult result = _device.Api.vkCreateSwapchainKHR(&createInfo, out VkSwapchainKHR swapchain);
         if (result != VkResult.Success)
         {
             Log.Error($"The window's images could not be made: {result}.");
@@ -198,10 +215,10 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         }
 
         _swapchain = swapchain;
-        device.Api.vkGetSwapchainImagesKHR(_swapchain, out uint imageCount);
+        _device.Api.vkGetSwapchainImagesKHR(_swapchain, out uint imageCount);
         Log.Info($"Window images: {imageCount} of {width}x{height}, {presentMode} of {string.Join(", ", modes)}.");
         VkImage[] images = new VkImage[imageCount];
-        device.Api.vkGetSwapchainImagesKHR(_swapchain, images);
+        _device.Api.vkGetSwapchainImagesKHR(_swapchain, images);
         _textures = new GpuTexture[imageCount];
         _rendered = new VkSemaphore[imageCount];
         TextureDescription description = new(
@@ -213,7 +230,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         );
         for (int i = 0; i < imageCount; i++)
         {
-            Result<GpuTexture> texture = resources.AddWindowTexture(images[i], description);
+            Result<GpuTexture> texture = _resources.AddWindowTexture(images[i], description);
 
             if (!texture.Ok)
             {
@@ -224,7 +241,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             }
 
             _textures[i] = texture.Value;
-            device.Api.vkCreateSemaphore(out _rendered[i]);
+            _device.Api.vkCreateSemaphore(out _rendered[i]);
         }
     }
 
@@ -233,9 +250,9 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     /// </summary>
     private VkSurfaceFormatKHR PickFormat(VkSurfaceKHR surface)
     {
-        device.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(device.PhysicalDevice, surface, out uint count);
+        _device.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(_device.PhysicalDevice, surface, out uint count);
         Span<VkSurfaceFormatKHR> formats = new VkSurfaceFormatKHR[count];
-        device.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(device.PhysicalDevice, surface, formats);
+        _device.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(_device.PhysicalDevice, surface, formats);
         foreach (VkSurfaceFormatKHR format in formats)
         {
             bool isSrgb = format.format is VkFormat.B8G8R8A8Srgb or VkFormat.R8G8B8A8Srgb;

@@ -27,7 +27,7 @@ internal readonly record struct DenoiserTextures(
 /// <remarks>
 /// One for each view: its NRD instance and last frame's matrices are the view's own.
 /// </remarks>
-internal sealed unsafe class Denoiser : IDisposable
+internal sealed unsafe class Denoiser : Disposable
 {
     private const uint Identifier = 0;
 
@@ -50,7 +50,7 @@ internal sealed unsafe class Denoiser : IDisposable
     /// Makes the view's NRD instance. It takes the SPIR-V of <paramref name="first"/>, the first view's denoiser, so
     /// all views share one set of pipelines: the GPU provider keys a pipeline by its SPIR-V's memory.
     /// </summary>
-    public Denoiser(IGraphicsApi gpu, Denoiser? first)
+    internal Denoiser(IGraphicsApi gpu, Denoiser? first)
     {
         _gpu = gpu;
         Nrd.DenoiserDesc denoiser = new() { identifier = Identifier, denoiser = Nrd.Denoiser.RELAX_DIFFUSE };
@@ -61,6 +61,7 @@ internal sealed unsafe class Denoiser : IDisposable
             throw new InvalidOperationException($"NRD made no instance: {created}.");
 
         _instance = instance;
+        Track(() => Nrd.NRD.DestroyInstance(_instance));
         Nrd.RelaxSettings relax = Relax;
         Nrd.Result relaxSet = Nrd.NRD.SetDenoiserSettings(instance, Identifier, &relax);
         if (relaxSet != Nrd.Result.SUCCESS)
@@ -137,12 +138,10 @@ internal sealed unsafe class Denoiser : IDisposable
             enableRoughnessEdgeStopping = true,
         };
 
-    public void Dispose() => Nrd.NRD.DestroyInstance(_instance);
-
     /// <summary>
     /// Gets the view's input and output textures at the traced size.
     /// </summary>
-    public static Result<DenoiserTextures> Prepare(IGraphicsApi gpu, in GIView view)
+    internal static Result<DenoiserTextures> Prepare(IGraphicsApi gpu, in GIView view)
     {
         Result<GpuTexture> motion = gpu.GetTexture(view.GetTraced("NRD motion", GpuFormat.R16G16Sfloat), view.Index);
         Result<GpuTexture> normal = gpu.GetTexture(
@@ -172,7 +171,7 @@ internal sealed unsafe class Denoiser : IDisposable
     /// <remarks>
     /// With <paramref name="isRestart"/>, NRD drops its history: a new size, a camera cut or a domain load.
     /// </remarks>
-    public Result Record(GIView view, DenoiserTextures textures, uint frameIndex, float deltaSeconds, bool isRestart)
+    internal Result Record(GIView view, DenoiserTextures textures, uint frameIndex, float deltaSeconds, bool isRestart)
     {
         RenderGraph graph = view.Graph;
         DeferredRendering.View.FrameConstants rows = view.Gpu.Constants;

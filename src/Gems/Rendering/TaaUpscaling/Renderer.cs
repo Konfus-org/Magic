@@ -229,10 +229,10 @@ internal record struct UpscaleConstants
     /// <summary>
     /// The linear clamp sampler the history is read through.
     /// </summary>
-    public uint Sampler;
+    internal uint Sampler;
 
     /// <summary>
     /// How much of now each pixel takes at least where the history is on the screen: more while the history settles.
     /// </summary>
-    public float LeastBlend;
+    internal float LeastBlend;
 }

@@ -7,3 +7,4 @@ Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
 MG0001 | Layout | Warning | MemberOrderAnalyzer
 MG0002 | Null | Warning | NoNullForgivingAnalyzer
+MG0003 | Usage | Warning | DisposeOwnedFieldsAnalyzer

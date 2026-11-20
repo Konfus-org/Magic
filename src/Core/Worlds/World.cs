@@ -46,7 +46,7 @@ internal readonly record struct DomainRead(Handle<Domain> Domain, Domain Asset, 
 /// Make entity calls on the game thread. Make the other calls on any thread.
 /// </para>
 /// </remarks>
-public sealed class World : IEcs, IWorldClock, IDisposable
+public sealed class World : Disposable, IEcs, IWorldClock
 {
     /// <summary>
     /// How long the cover takes to fade in or out.
@@ -75,7 +75,7 @@ public sealed class World : IEcs, IWorldClock, IDisposable
     /// <summary>
     /// Held while work on the world runs, so it runs in turn.
     /// </summary>
-    private readonly SemaphoreSlim _turn = new(1, 1);
+    private readonly SemaphoreSlim _turn;
 
     /// <summary>
     /// Each open domain and the prefabs it placed, as they were read. Game thread.
@@ -142,15 +142,8 @@ public sealed class World : IEcs, IWorldClock, IDisposable
         _events = events;
         _threads = threads;
         _app = app;
+        _turn = Track(new SemaphoreSlim(1, 1));
     }
-
-    /// <summary>
-    /// The domains open, in the order they came, without the loading screen.
-    /// </summary>
-    /// <remarks>
-    /// While the loading screen shows, it is empty.
-    /// </remarks>
-    public ImmutableArray<Handle<Domain>> Domains { get; private set; } = [];
 
     /// <summary>
     /// Whether a domain or a saved world replaces what is in the world.
@@ -196,6 +189,14 @@ public sealed class World : IEcs, IWorldClock, IDisposable
     } = 1;
 
     /// <summary>
+    /// The domains open, in the order they came, without the loading screen.
+    /// </summary>
+    /// <remarks>
+    /// While the loading screen shows, it is empty.
+    /// </remarks>
+    public ImmutableArray<Handle<Domain>> Domains { get; private set; } = [];
+
+    /// <summary>
     /// The last frame whose hooks before Render ran, so that what it made of the world is ready for the render thread.
     /// </summary>
     /// <remarks>
@@ -232,56 +233,6 @@ public sealed class World : IEcs, IWorldClock, IDisposable
         ?? throw new InvalidOperationException(
             "No gem the project lists provides the ECS, so the world holds no entities."
         );
-
-    public void Dispose() => _turn.Dispose();
-
-    /// <summary>
-    /// Opens <paramref name="domain"/> in place of what is in the world but the globals, with the player at its spawn.
-    /// </summary>
-    /// <remarks>
-    /// The loading screen shows until the domain is there. Workers read the domain first, so a domain that does not
-    /// load leaves the world as it was. It returns why not when the domain does not load or no gem gives the ECS.
-    /// </remarks>
-    public async Task<Result> OpenAsync(
-        Handle<Domain> domain,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        Result opened = await RunInTurnAsync(() => OpenDomainAsync(domain, progress, cancel), cancel)
-            .ConfigureAwait(false);
-
-        return opened.Ok ? opened : Result.Failure($"The domain does not open: {opened.Error}");
-    }
-
-    /// <summary>
-    /// Loads <paramref name="prefab"/>, puts it in the world at <paramref name="at"/>, and returns its entities.
-    /// </summary>
-    /// <remarks>
-    /// The caller destroys the entities. When a domain replaces the world, the entities that are still there go. It
-    /// returns why not when the prefab does not load or no gem gives the ECS. For a single entity, use
-    /// <see cref="Create"/>.
-    /// </remarks>
-    public async Task<Result<ImmutableArray<Entity>>> SpawnAsync(
-        Handle<Prefab> prefab,
-        Transform at,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        if (!HasEcs)
-            return Result.Failure("Nothing spawns: no gem the project lists provides the ECS.");
-
-        Result<Prefab> loaded = await _assets.LoadAsync(prefab, progress, cancel).ConfigureAwait(false);
-        if (!loaded.Ok)
-            return Result.Failure(loaded.Error);
-
-        ImmutableArray<ImmutableArray<IComponent>> coming = GetEntities(loaded.Value, at);
-
-        return Result.Success(
-            await RunInTurnAsync(() => Task.FromResult(CreateEntities(coming)), cancel).ConfigureAwait(false)
-        );
-    }
 
     /// <summary>
     /// Creates an entity with <paramref name="components"/> now.
@@ -399,6 +350,54 @@ public sealed class World : IEcs, IWorldClock, IDisposable
     public void MutateParallel<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1, T2>> run)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent => Ecs.MutateParallel(in state, run);
+
+    /// <summary>
+    /// Opens <paramref name="domain"/> in place of what is in the world but the globals, with the player at its spawn.
+    /// </summary>
+    /// <remarks>
+    /// The loading screen shows until the domain is there. Workers read the domain first, so a domain that does not
+    /// load leaves the world as it was. It returns why not when the domain does not load or no gem gives the ECS.
+    /// </remarks>
+    public async Task<Result> OpenAsync(
+        Handle<Domain> domain,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+    {
+        Result opened = await RunInTurnAsync(() => OpenDomainAsync(domain, progress, cancel), cancel)
+            .ConfigureAwait(false);
+
+        return opened.Ok ? opened : Result.Failure($"The domain does not open: {opened.Error}");
+    }
+
+    /// <summary>
+    /// Loads <paramref name="prefab"/>, puts it in the world at <paramref name="at"/>, and returns its entities.
+    /// </summary>
+    /// <remarks>
+    /// The caller destroys the entities. When a domain replaces the world, the entities that are still there go. It
+    /// returns why not when the prefab does not load or no gem gives the ECS. For a single entity, use
+    /// <see cref="Create"/>.
+    /// </remarks>
+    public async Task<Result<ImmutableArray<Entity>>> SpawnAsync(
+        Handle<Prefab> prefab,
+        Transform at,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+    {
+        if (!HasEcs)
+            return Result.Failure("Nothing spawns: no gem the project lists provides the ECS.");
+
+        Result<Prefab> loaded = await _assets.LoadAsync(prefab, progress, cancel).ConfigureAwait(false);
+        if (!loaded.Ok)
+            return Result.Failure(loaded.Error);
+
+        ImmutableArray<ImmutableArray<IComponent>> coming = GetEntities(loaded.Value, at);
+
+        return Result.Success(
+            await RunInTurnAsync(() => Task.FromResult(CreateEntities(coming)), cancel).ConfigureAwait(false)
+        );
+    }
 
     /// <summary>
     /// Puts the game back as <paramref name="saved"/> holds it, in place of all of the world, globals too.

@@ -29,10 +29,10 @@ public readonly record struct Frame
     /// </summary>
     public required double SimDeltaSec { get; init; }
 
-    public bool IsPaused { get; init; }
-
     /// <summary>
     /// The messages published during the last frame. None in a fixed step: take them in <see cref="IGem.Update"/>.
     /// </summary>
     public FrameEvents Events { get; init; }
+
+    public bool IsPaused { get; init; }
 }

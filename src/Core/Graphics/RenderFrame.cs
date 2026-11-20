@@ -30,15 +30,6 @@ public readonly record struct RenderFrame
     /// <inheritdoc cref="Frame.AppDeltaSec"/>
     public double AppDeltaSec => _frame.AppDeltaSec;
 
-    /// <inheritdoc cref="Frame.SimSec"/>
-    public double SimSec => _frame.SimSec;
-
-    /// <inheritdoc cref="Frame.SimDeltaSec"/>
-    public double SimDeltaSec => _frame.SimDeltaSec;
-
-    /// <inheritdoc cref="Frame.IsPaused"/>
-    public bool IsPaused => _frame.IsPaused;
-
     /// <summary>
     /// The view that the step runs for, from 0 (<see cref="RenderViews"/>); 0 in a step that runs once a frame.
     /// </summary>
@@ -54,6 +45,15 @@ public readonly record struct RenderFrame
     /// Read it late in the frame, after the other gems have recorded.
     /// </remarks>
     public ReadOnlySpan<(RenderFailure Kind, string What)> Failures => _rendering.Failures;
+
+    /// <inheritdoc cref="Frame.SimSec"/>
+    public double SimSec => _frame.SimSec;
+
+    /// <inheritdoc cref="Frame.SimDeltaSec"/>
+    public double SimDeltaSec => _frame.SimDeltaSec;
+
+    /// <inheritdoc cref="Frame.IsPaused"/>
+    public bool IsPaused => _frame.IsPaused;
 
     /// <summary>
     /// Whether no step makes <typeparamref name="T"/> this frame. Ask it late in the frame.

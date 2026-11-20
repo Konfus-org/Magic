@@ -41,7 +41,7 @@ namespace Magic.ImGuiDebugUI;
 /// one make in their Update go into it. <see cref="EndFrame"/> draws the reports and ends the frame, which
 /// <see cref="Renderer"/> then publishes. Reports come from any thread (<see cref="Reports"/>).
 /// </remarks>
-public sealed class DebugUI : IDebugUI, IDisposable
+public sealed class DebugUI : Disposable, IDebugUI
 {
     private const int InputBytes = 256;
 
@@ -174,16 +174,14 @@ public sealed class DebugUI : IDebugUI, IDisposable
         platform->Platform_ClipboardUserData = (void*)GCHandle<DebugUI>.ToIntPtr(_self);
         platform->Platform_SetClipboardTextFn = &SetClipboard;
         platform->Platform_GetClipboardTextFn = &GetClipboard;
+
+        // Tracked last first: the context ends before the text it was fed, and the handle its callbacks use ends last.
+        Track(_self);
+        Track(_text);
+        Track(() => ImGui_DestroyContext(_context));
     }
 
     public bool IsEnabled => true;
-
-    public unsafe void Dispose()
-    {
-        ImGui_DestroyContext(_context);
-        _text.Dispose();
-        _self.Dispose();
-    }
 
     /// <summary>
     /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.

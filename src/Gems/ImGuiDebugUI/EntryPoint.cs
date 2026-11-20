@@ -4,6 +4,7 @@ using Magic.Graphics;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
+using Magic.Utils;
 
 namespace Magic.ImGuiDebugUI;
 
@@ -15,7 +16,7 @@ namespace Magic.ImGuiDebugUI;
 /// their Update go into it. <see cref="Renderer"/> draws each frame over the window's image.
 /// <see cref="LogSink"/> shows the lines logged to show on screen.
 /// </remarks>
-public sealed class EntryPoint : IGem, IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
     public EntryPoint(
         ImGuiDebugUISettings settings,
@@ -31,6 +32,7 @@ public sealed class EntryPoint : IGem, IDisposable
         Reports reports = new();
         Settings = settings;
         DebugUI = new DebugUI(settings, app, ecs, reports, input, clipboard);
+        Track(DebugUI);
         LogSink = new LogSink(settings, reports);
         Renderer = new Renderer(assets, gpu);
     }
@@ -45,8 +47,6 @@ public sealed class EntryPoint : IGem, IDisposable
     public LogSink LogSink { get; }
 
     public Renderer Renderer { get; }
-
-    public void Dispose() => DebugUI.Dispose();
 
     public void Update(in Frame frame) => DebugUI.BeginFrame(frame);
 

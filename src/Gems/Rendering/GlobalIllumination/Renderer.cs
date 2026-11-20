@@ -25,7 +25,7 @@ public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld
 /// <remarks>
 /// It uses the probe grid and the traced diffuse light, and writes into the view's frame buffer. Shading takes the indirect light. Each view has its own grid and history.
 /// </remarks>
-public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading, IDisposable
+public sealed class Renderer : Disposable, IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
 {
     /// <summary>
     /// What a view takes while it settles, after its probes start afresh: the most diffuse rays, a sky share that keeps
@@ -98,6 +98,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     {
         _settings = settings;
         _terms = terms;
+        Track(() =>
+        {
+            foreach (Denoiser denoiser in _denoisers)
+                denoiser.Dispose();
+        });
         _settling = new SettleWait(threads);
         unsafe
         {
@@ -331,12 +336,6 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             _settling.End();
 
         return new IndirectLight(nrd.Value.Output, gi.Depth, grid.Probes, grid.Depth);
-    }
-
-    public void Dispose()
-    {
-        foreach (Denoiser denoiser in _denoisers)
-            denoiser.Dispose();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Magic.Threading;
+using Magic.Utils;
 
 namespace Magic.Debugging;
 
@@ -135,7 +136,7 @@ internal static class MetricsLog
     /// The threads that record add each measurement to its sum under a lock, so the memory stays flat however long it
     /// listens.
     /// </remarks>
-    private sealed class Sampler : IDisposable
+    private sealed class Sampler : Disposable
     {
         private readonly string _category;
         private readonly MeterListener _listener;
@@ -146,25 +147,25 @@ internal static class MetricsLog
         public Sampler(string category)
         {
             _category = category;
-            _listener = new MeterListener
-            {
-                InstrumentPublished = (instrument, listening) =>
+            _listener = Track(
+                new MeterListener
                 {
-                    // The Magic.* meters and .NET's runtime, each instrument with the category as a part of its name.
-                    string meter = instrument.Meter.Name;
-                    bool isOurs = meter.StartsWith("Magic.", StringComparison.Ordinal) || meter == "System.Runtime";
-                    if (isOurs && (category == All || instrument.Name.Split('.').Contains(category)))
-                        listening.EnableMeasurementEvents(instrument);
-                },
-            };
+                    InstrumentPublished = (instrument, listening) =>
+                    {
+                        // The Magic.* meters and .NET's runtime, each instrument with the category as a part of its name.
+                        string meter = instrument.Meter.Name;
+                        bool isOurs = meter.StartsWith("Magic.", StringComparison.Ordinal) || meter == "System.Runtime";
+                        if (isOurs && (category == All || instrument.Name.Split('.').Contains(category)))
+                            listening.EnableMeasurementEvents(instrument);
+                    },
+                }
+            );
             _listener.SetMeasurementEventCallback<double>(Record);
             _listener.SetMeasurementEventCallback<float>(Record);
             _listener.SetMeasurementEventCallback<long>(Record);
             _listener.SetMeasurementEventCallback<int>(Record);
             _listener.Start();
         }
-
-        public void Dispose() => _listener.Dispose();
 
         /// <summary>
         /// Describes what was measured since the last summary or the start: a line per instrument and set of tags. It

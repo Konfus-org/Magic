@@ -20,7 +20,7 @@ namespace Magic.Projects;
 /// Each run makes one, and disposing it unloads the code of the run. <see cref="Get{T}"/> finds a type of Core's code,
 /// or of code that a gem or the project registered, on any thread.
 /// </remarks>
-public sealed class Assemblies : IDisposable
+public sealed class Assemblies : Disposable
 {
     /// <summary>
     /// How long loaded code must have been left alone after a build wrote it.
@@ -49,14 +49,18 @@ public sealed class Assemblies : IDisposable
     /// </summary>
     private readonly Dictionary<string, CodeLoadContext> _contexts = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly Subscriptions _watches = [];
-
     /// <summary>
     /// When a watch last saw a build write code of the run, 0 when none has: written whole from the watches' threads.
     /// </summary>
     private long _buildTimestamp;
 
-    internal Assemblies(IFileSystem files) => _files = files;
+    internal Assemblies(IFileSystem files)
+    {
+        _files = files;
+
+        // Tracked first, so it runs after the watches that a later Add tracks.
+        Track(Unload);
+    }
 
     /// <summary>
     /// Whether a build wrote code of the run and then left it alone a while, so the run must restart on the new code.
@@ -101,20 +105,6 @@ public sealed class Assemblies : IDisposable
         ];
 
     /// <summary>
-    /// Unloads the code of the run. Dispose it after the gems, which use it.
-    /// </summary>
-    public void Dispose()
-    {
-        _watches.Dispose();
-        foreach (CodeLoadContext context in _contexts.Values)
-        {
-            context.Unload();
-        }
-
-        _contexts.Clear();
-    }
-
-    /// <summary>
     /// Adds a gem's or a project's <paramref name="assembly"/> to the types that <see cref="Get{T}"/> finds, until the
     /// subscription is disposed. Game thread.
     /// </summary>
@@ -150,7 +140,7 @@ public sealed class Assemblies : IDisposable
             _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
         );
         if (watched.Ok)
-            _watches.Add(new Subscription(watched.Value.Dispose));
+            _ = Track(watched.Value);
         else
             Log.Warn($"{name} is not watched, so a build of it won't restart the run: {watched.Error}");
     }
@@ -198,9 +188,22 @@ public sealed class Assemblies : IDisposable
 
         return byName.ToFrozenDictionary(StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// Unloads the code of the run, after the watches end. Dispose this object after the gems, which use the code.
+    /// </summary>
+    private void Unload()
+    {
+        foreach (CodeLoadContext context in _contexts.Values)
+        {
+            context.Unload();
+        }
+
+        _contexts.Clear();
+    }
 }
 
-public static class AssemblyExtensions
+internal static class AssemblyExtensions
 {
     extension(Assembly assembly)
     {

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Magic.Utils;
 
 namespace Magic.ImGuiDebugUI;
 
@@ -10,23 +11,14 @@ namespace Magic.ImGuiDebugUI;
 /// A pointer handed out stays good until <see cref="Reset"/>, however many strings follow it. The blocks are used again
 /// from the start each frame, because ImGui copies or hashes what it gets within the call.
 /// </remarks>
-internal sealed unsafe class TextArena : IDisposable
+internal sealed unsafe class TextArena : Disposable
 {
     private const int BlockBytes = 64 * 1024;
     private readonly List<(nint Start, int Bytes)> _blocks = [];
     private int _block = -1;
     private int _used;
 
-    public void Dispose()
-    {
-        foreach ((nint start, _) in _blocks)
-        {
-            NativeMemory.Free((void*)start);
-        }
-
-        _blocks.Clear();
-        Reset();
-    }
+    public TextArena() => Track(FreeBlocks);
 
     /// <summary>
     /// The text as a C string, good until <see cref="Reset"/>.
@@ -70,5 +62,16 @@ internal sealed unsafe class TextArena : IDisposable
     {
         _block = -1;
         _used = 0;
+    }
+
+    private void FreeBlocks()
+    {
+        foreach ((nint start, _) in _blocks)
+        {
+            NativeMemory.Free((void*)start);
+        }
+
+        _blocks.Clear();
+        Reset();
     }
 }

@@ -31,41 +31,6 @@ public readonly ref struct DrawPass
 
     public DrawPass Reads(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.ShaderRead);
 
-    public DrawPass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
-
-    /// <summary>
-    /// Draws as many times as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
-    /// <paramref name="maxDraws"/>.
-    /// </summary>
-    /// <remarks>
-    /// The arguments start at <paramref name="argumentsOffset"/> in <paramref name="arguments"/>,
-    /// <paramref name="stride"/> bytes apart. Each is four unsigned integers: vertices, instances, first vertex, first
-    /// instance.
-    /// </remarks>
-    public void DrawIndirectCount(
-        GpuBuffer arguments,
-        ulong argumentsOffset,
-        GpuBuffer count,
-        ulong countOffset,
-        uint maxDraws,
-        uint stride = 16
-    )
-    {
-        _graph.Add(
-            new()
-            {
-                Kind = GpuCommandKind.DrawIndirectCount,
-                Id = arguments.Id,
-                Offset = argumentsOffset,
-                Id2 = count.Id,
-                Offset2 = countOffset,
-                X = maxDraws,
-                Y = stride,
-            }
-        );
-        _graph.EndPass();
-    }
-
     /// <summary>
     /// Draws each of <paramref name="draws"/> in order with 32-bit indices from <paramref name="indices"/>, each
     /// clipped to its scissor with its constants pushed.
@@ -101,6 +66,41 @@ public readonly ref struct DrawPass
             );
         }
 
+        _graph.EndPass();
+    }
+
+    public DrawPass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
+
+    /// <summary>
+    /// Draws as many times as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
+    /// <paramref name="maxDraws"/>.
+    /// </summary>
+    /// <remarks>
+    /// The arguments start at <paramref name="argumentsOffset"/> in <paramref name="arguments"/>,
+    /// <paramref name="stride"/> bytes apart. Each is four unsigned integers: vertices, instances, first vertex, first
+    /// instance.
+    /// </remarks>
+    public void DrawIndirectCount(
+        GpuBuffer arguments,
+        ulong argumentsOffset,
+        GpuBuffer count,
+        ulong countOffset,
+        uint maxDraws,
+        uint stride = 16
+    )
+    {
+        _graph.Add(
+            new()
+            {
+                Kind = GpuCommandKind.DrawIndirectCount,
+                Id = arguments.Id,
+                Offset = argumentsOffset,
+                Id2 = count.Id,
+                Offset2 = countOffset,
+                X = maxDraws,
+                Y = stride,
+            }
+        );
         _graph.EndPass();
     }
 

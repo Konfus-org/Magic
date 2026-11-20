@@ -23,14 +23,14 @@ internal sealed class TracedDiffuse(AssetManager assets)
     /// <summary>
     /// The trace's entry, generic over the sky, which the renderer specialises on the frame's sky.
     /// </summary>
-    public ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse");
+    internal ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse");
 
-    public ImmutableArray<ShaderEntry> Shaders => [_skyShareShader];
+    internal ImmutableArray<ShaderEntry> Shaders => [_skyShareShader];
 
     /// <summary>
     /// Asks for the trace's texture at the traced size, beside NRD's inputs.
     /// </summary>
-    public static Result<TracedDiffuseConstants> Prepare(
+    internal static Result<TracedDiffuseConstants> Prepare(
         IGraphicsApi gpu,
         in GIView view,
         in DenoiserTextures nrd,
@@ -61,7 +61,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
     /// Records the trace, which lights a hit on the screen with <paramref name="lastLight"/>, last frame's denoised
     /// light, before this frame's denoise writes it again.
     /// </summary>
-    public void RecordTrace(in GIView view, in ProbeGridConstants grid, in GIConstants gi, GpuTexture lastLight)
+    internal void RecordTrace(in GIView view, in ProbeGridConstants grid, in GIConstants gi, GpuTexture lastLight)
     {
         TracedDiffuseConstants diffuse = gi.Diffuse;
         (int width, int height) = view.TracedSize;
@@ -81,7 +81,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
             .DispatchOver(width, height);
     }
 
-    public void RecordSkyShare(in GIView view, in GIConstants gi)
+    internal void RecordSkyShare(in GIView view, in GIConstants gi)
     {
         (int width, int height) = view.TracedSize;
         view.Graph.Compute("Blend sky share", _skyShareShader, view.Header, RenderStages.Light)

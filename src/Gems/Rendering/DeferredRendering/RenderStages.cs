@@ -19,12 +19,12 @@ public static class RenderStages
     public static readonly RenderStage Light = new(2);
 
     /// <summary>
-    /// The view's surfaces shaded into the picture.
-    /// </summary>
-    public static readonly RenderStage Shade = new(3);
-
-    /// <summary>
     /// What finishes the picture, and its copy to the window or a screenshot.
     /// </summary>
     public static readonly RenderStage Post = new(4);
+
+    /// <summary>
+    /// The view's surfaces shaded into the picture.
+    /// </summary>
+    internal static readonly RenderStage Shade = new(3);
 }

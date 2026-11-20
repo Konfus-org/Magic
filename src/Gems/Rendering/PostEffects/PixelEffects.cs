@@ -53,7 +53,7 @@ internal sealed class PixelEffects(IGraphicsApi gpu)
     /// Runs the effects that are ready, in order, over the view's picture in <paramref name="frame"/>, each
     /// with its material's row in <paramref name="rows"/> at its place.
     /// </summary>
-    public void Record(
+    internal void Record(
         in RenderFrame frame,
         RenderGraph graph,
         in GpuView gpu,

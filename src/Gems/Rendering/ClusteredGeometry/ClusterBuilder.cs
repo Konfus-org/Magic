@@ -49,7 +49,7 @@ internal static unsafe class ClusterBuilder
     /// </summary>
     private const float CreaseAngle = MathF.PI / 4;
 
-    public static ModelClusters Build(Model model)
+    internal static ModelClusters Build(Model model)
     {
         // The model's own vertices first, every mesh's, which the leaves draw, then each level's copies.
         ImmutableArray<GpuVertex>.Builder vertices = ImmutableArray.CreateBuilder<GpuVertex>();

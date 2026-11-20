@@ -11,17 +11,17 @@ namespace Magic.DeferredRendering.View;
 /// </remarks>
 internal sealed class RenderInputs
 {
-    public EcsSnapshot<Transform, Ecs.Components.Renderer> Renderers { get; } = new();
+    internal EcsSnapshot<Transform, Ecs.Components.Renderer> Renderers { get; } = new();
 
-    public EcsSnapshot<Transform, Camera> Cameras { get; } = new();
+    internal EcsSnapshot<Transform, Camera> Cameras { get; } = new();
 
-    public EcsSnapshot<Transform, DirectionalLight> DirectionalLights { get; } = new();
+    internal EcsSnapshot<Transform, DirectionalLight> DirectionalLights { get; } = new();
 
-    public EcsSnapshot<Transform, PointLight> PointLights { get; } = new();
+    internal EcsSnapshot<Transform, PointLight> PointLights { get; } = new();
 
-    public EcsSnapshot<Transform, SpotLight> SpotLights { get; } = new();
+    internal EcsSnapshot<Transform, SpotLight> SpotLights { get; } = new();
 
-    public EcsSnapshot<Transform, RectLight> RectLights { get; } = new();
+    internal EcsSnapshot<Transform, RectLight> RectLights { get; } = new();
 
     /// <summary>
     /// The number of the world the frame is of, new each time a domain replaces it.
@@ -29,5 +29,5 @@ internal sealed class RenderInputs
     /// <remarks>
     /// The render thread tells the first frame of another world by it.
     /// </remarks>
-    public int WorldNumber { get; set; }
+    internal int WorldNumber { get; set; }
 }

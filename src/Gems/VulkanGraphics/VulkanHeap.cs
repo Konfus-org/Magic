@@ -1,4 +1,5 @@
 using Magic.Graphics;
+using Magic.Utils;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;
@@ -12,7 +13,7 @@ namespace Magic.VulkanGraphics;
 /// shader declares it. The set is bound once per pass and never changes shape. Only its contents change as resources
 /// come and go.
 /// </remarks>
-internal sealed unsafe class VulkanHeap : IDisposable
+internal sealed unsafe class VulkanHeap : Disposable
 {
     /// <summary>
     /// The most textures the heap holds; a texture's id is below this.
@@ -44,16 +45,25 @@ internal sealed unsafe class VulkanHeap : IDisposable
     public const VkShaderStageFlags PushStages = VkShaderStageFlags.AllGraphics | VkShaderStageFlags.Compute;
 
     private const uint BufferBinding = 0;
+
     private const uint Texture2DBinding = 1;
+
     private const uint Texture3DBinding = 4;
+
     private const uint UintTexture2DBinding = 5;
+
     private const uint Storage2DBinding = 6;
+
     private const uint Storage3DBinding = 8;
+
     private const uint SamplerBinding = 10;
+
     private const uint AccelerationBinding = 11;
 
     private readonly VkDeviceApi _api;
+
     private readonly VkDescriptorSetLayout _layout;
+
     private readonly VkDescriptorPool _pool;
 
     public VulkanHeap(VkDeviceApi api, bool hasAcceleration)
@@ -157,13 +167,6 @@ internal sealed unsafe class VulkanHeap : IDisposable
     /// The one layout every pipeline is built with: the heap's set and the push constants.
     /// </summary>
     public VkPipelineLayout PipelineLayout { get; }
-
-    public void Dispose()
-    {
-        _api.vkDestroyPipelineLayout(PipelineLayout);
-        _api.vkDestroyDescriptorPool(_pool);
-        _api.vkDestroyDescriptorSetLayout(_layout);
-    }
 
     /// <summary>
     /// Puts an acceleration structure where shaders trace through it.
@@ -287,6 +290,18 @@ internal sealed unsafe class VulkanHeap : IDisposable
             pImageInfo = &info,
         };
         _api.vkUpdateDescriptorSets(1, &write, 0, null);
+    }
+
+    // Not tracked: the layout, then the pool, then the set layout.
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        _api.vkDestroyPipelineLayout(PipelineLayout);
+        _api.vkDestroyDescriptorPool(_pool);
+        _api.vkDestroyDescriptorSetLayout(_layout);
+        base.Dispose(disposing);
     }
 
     private static VkDescriptorSetLayoutBinding Binding(uint binding, VkDescriptorType type, uint count) =>

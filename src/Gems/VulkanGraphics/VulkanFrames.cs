@@ -14,7 +14,7 @@ namespace Magic.VulkanGraphics;
 /// Two frames take turns, so the CPU records frame n + 1 while the GPU draws frame n. The CPU never waits for more
 /// than one frame.
 /// </remarks>
-internal sealed unsafe class VulkanFrames : IDisposable
+internal sealed unsafe class VulkanFrames : Disposable
 {
     public const int InFlight = 2;
 
@@ -30,16 +30,25 @@ internal sealed unsafe class VulkanFrames : IDisposable
     /// so a load that uploads every few frames doesn't make it again each time.
     /// </summary>
     private const double StagingKeptSec = 2;
+
     private const string PassTag = "magic.gems.vulkan_graphics.gpu.pass";
 
     private readonly VulkanDevice _device;
+
     private readonly VulkanResources _resources;
+
     private readonly Histogram<double> _passDuration;
+
     private readonly Histogram<double> _frameDuration;
+
     private readonly Frame[] _frames = new Frame[InFlight];
+
     private readonly List<Readback> _readbacks = [];
+
     private int _current;
+
     private ulong _serial;
+
     private ulong _completedSerial;
 
     /// <summary>
@@ -74,21 +83,6 @@ internal sealed unsafe class VulkanFrames : IDisposable
     /// next frame to compact.
     /// </summary>
     public List<(VulkanAcceleration Built, ulong Bytes)> Compactable { get; } = [];
-
-    public void Dispose()
-    {
-        _device.Api.vkDeviceWaitIdle();
-        foreach (Frame frame in _frames)
-        {
-            Complete(frame);
-            frame.Dispose();
-        }
-
-        foreach (Readback readback in _readbacks)
-        {
-            readback.Promise.TrySetResult(Result.Failure("the GPU was shut down first."));
-        }
-    }
 
     /// <summary>
     /// Moves to the next frame and makes it ready to record.
@@ -213,6 +207,27 @@ internal sealed unsafe class VulkanFrames : IDisposable
         return promise.Task;
     }
 
+    // Not tracked: wait idle first, then each frame, then the readbacks.
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        _device.Api.vkDeviceWaitIdle();
+        foreach (Frame frame in _frames)
+        {
+            Complete(frame);
+            frame.Dispose();
+        }
+
+        foreach (Readback readback in _readbacks)
+        {
+            readback.Promise.TrySetResult(Result.Failure("the GPU was shut down first."));
+        }
+
+        base.Dispose(disposing);
+    }
+
     /// <summary>
     /// Finishes what the GPU is done with: the readbacks up to its serial, then the frame's trash and timestamps.
     /// </summary>
@@ -272,9 +287,10 @@ internal sealed unsafe class VulkanFrames : IDisposable
     /// <summary>
     /// Holds what one frame in flight owns.
     /// </summary>
-    public sealed class Frame : IDisposable
+    public sealed class Frame : Disposable
     {
         private readonly VulkanDevice _device;
+
         private readonly VulkanResources _resources;
 
         public Frame(VulkanDevice device, VulkanResources resources, int index)
@@ -398,16 +414,6 @@ internal sealed unsafe class VulkanFrames : IDisposable
         /// The timestamps written, by query index: a name and which pass it belongs to.
         /// </summary>
         public List<(string Name, int Pass)> Timestamps { get; } = [];
-
-        public void Dispose()
-        {
-            _device.Api.vkDestroyDescriptorPool(Descriptors);
-            _device.Api.vkDestroyQueryPool(Queries);
-            _device.Api.vkDestroyQueryPool(CompactedSizes);
-            _device.Api.vkDestroySemaphore(Acquired);
-            _device.Api.vkDestroyFence(Fence);
-            _device.Api.vkDestroyCommandPool(Pool);
-        }
 
         /// <summary>
         /// Makes a new staging ring of <paramref name="bytes"/> in the heap. The caller frees the old ring, if any.
@@ -553,6 +559,21 @@ internal sealed unsafe class VulkanFrames : IDisposable
                     );
                 }
             }
+        }
+
+        // Not tracked: the handles go in the order the frame's pools need.
+        protected override void Dispose(bool disposing)
+        {
+            if (IsDisposed)
+                return;
+
+            _device.Api.vkDestroyDescriptorPool(Descriptors);
+            _device.Api.vkDestroyQueryPool(Queries);
+            _device.Api.vkDestroyQueryPool(CompactedSizes);
+            _device.Api.vkDestroySemaphore(Acquired);
+            _device.Api.vkDestroyFence(Fence);
+            _device.Api.vkDestroyCommandPool(Pool);
+            base.Dispose(disposing);
         }
     }
 }

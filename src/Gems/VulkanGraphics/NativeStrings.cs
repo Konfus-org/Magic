@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Magic.Utils;
 
 namespace Magic.VulkanGraphics;
 
@@ -7,7 +8,7 @@ namespace Magic.VulkanGraphics;
 /// Strings as Vulkan takes them: an array of pointers to UTF-8 bytes each ending in 0, held in native memory until
 /// disposed, which is after the call that reads them.
 /// </summary>
-internal sealed unsafe class NativeStrings : IDisposable
+internal sealed unsafe class NativeStrings : Disposable
 {
     public NativeStrings(IReadOnlyList<string> strings)
     {
@@ -21,13 +22,15 @@ internal sealed unsafe class NativeStrings : IDisposable
             text[bytes] = 0;
             Pointers[i] = text;
         }
+
+        Track(Free);
     }
 
     public uint Count { get; }
 
     public byte** Pointers { get; }
 
-    public void Dispose()
+    private void Free()
     {
         for (uint i = 0; i < Count; i++)
         {

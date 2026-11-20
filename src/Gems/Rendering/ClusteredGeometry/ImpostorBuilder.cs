@@ -17,31 +17,31 @@ internal static class ImpostorBuilder
     /// <summary>
     /// Views across and down an atlas, on an octahedral grid over the whole sphere.
     /// </summary>
-    public const int Views = 12;
+    internal const int Views = 12;
 
     /// <summary>
     /// Texels a side of one view of an atlas.
     /// </summary>
-    public const int Tile = 64;
+    internal const int Tile = 64;
 
-    public const int Size = Views * Tile;
+    internal const int Size = Views * Tile;
 
     /// <summary>
     /// Texels down an atlas: the nearest face of each texel over the nearest front face of the same texel, which the
     /// impostor shows where the nearest face is the back face of a single-sided material.
     /// </summary>
-    public const int Height = Size * 2;
+    internal const int Height = Size * 2;
 
     /// <summary>
     /// Added to a texel's material slot where the view saw a back face, the gem's <c>ImpostorBackFace</c>.
     /// </summary>
-    public const uint BackFace = 8;
+    internal const uint BackFace = 8;
 
     /// <summary>
     /// Bakes the atlas as RGBA16F halves, the texture coordinates of the same texels as RG16F halves, row by row, and
     /// each view's silhouette bounds as <see cref="ModelClusters.ImpostorViewBounds"/> says.
     /// </summary>
-    public static (Half[] Surface, Half[] Uv, uint[] ViewBounds) Bake(
+    internal static (Half[] Surface, Half[] Uv, uint[] ViewBounds) Bake(
         IReadOnlyList<GpuVertex> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<GpuCluster> clusters,

@@ -14,17 +14,17 @@ namespace Magic.ProceduralSky;
 /// fit is within 2 % of each channel's median there. The table is per unit of the light's illuminance, so the
 /// <c>Sky.Brightness</c> of the scene and the light's lux still scale the sky.
 /// </remarks>
-public static class SkyCalibration
+internal static class SkyCalibration
 {
-    public static readonly Vector3 Gain = new(1.36f, 1.38f, 1.20f);
+    internal static readonly Vector3 Gain = new(1.36f, 1.38f, 1.20f);
 
-    public static readonly Vector3 GainPerHeight = new(0.60f, 0.31f, 0.18f);
+    internal static readonly Vector3 GainPerHeight = new(0.60f, 0.31f, 0.18f);
 
     /// <summary>
     /// The sky-view pass's header: the frame's buffer, then the gain and its change by height of each channel, as two
     /// half floats in each of Y, Z and W.
     /// </summary>
-    public static GpuConstants GetViewHeader(uint frame) =>
+    internal static GpuConstants GetViewHeader(uint frame) =>
         new(frame, Pack(Gain.X, GainPerHeight.X), Pack(Gain.Y, GainPerHeight.Y), Pack(Gain.Z, GainPerHeight.Z));
 
     private static uint Pack(float low, float high) =>

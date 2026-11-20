@@ -1,19 +1,23 @@
 using Magic.Assets;
 using Magic.Files;
 using Magic.Projects;
+using Magic.Utils;
 
 namespace Magic.SlangShaderCompiler;
 
 /// <summary>
 /// The gem: it makes the <see cref="ShaderCompiler"/> over its <see cref="Settings"/>.
 /// </summary>
-public sealed class EntryPoint(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
-    : IGem,
-        IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
-    public SlangShaderCompilerSettings Settings { get; } = settings;
+    public EntryPoint(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
+    {
+        Settings = settings;
+        ShaderCompiler = new ShaderCompiler(app, assets, caches, settings);
+        Track(ShaderCompiler);
+    }
 
-    public ShaderCompiler ShaderCompiler { get; } = new(app, assets, caches, settings);
+    public SlangShaderCompilerSettings Settings { get; }
 
-    public void Dispose() => ShaderCompiler.Dispose();
+    public ShaderCompiler ShaderCompiler { get; }
 }

@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.IO.Hashing;
 using System.Linq;
@@ -52,7 +51,7 @@ internal sealed record LoadedSession(nint Handle, Dictionary<string, (string Sou
 /// The entry's module and every module it imports, found as <see cref="Shader"/> assets, go into a session in
 /// dependency order. An unchanged entry never compiles twice.
 /// </remarks>
-public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledShader>, ICache<Reflection>, IDisposable
+public sealed partial class ShaderCompiler : Disposable, IShaderCompiler, ICache<CompiledShader>, ICache<Reflection>
 {
     private const string ShadersFolder = "Shaders";
 
@@ -106,15 +105,13 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     /// <summary>
     /// Releases the workers <see cref="IdleMs"/> after the last compile; each compile starts it again, as a debounce.
     /// </summary>
-    [SuppressMessage(
-        "Usage",
-        "CA2213:Disposable fields should be disposed",
-        Justification = "Dispose disposes it through Dispose(WaitHandle), which waits out a release still running."
-    )]
     private readonly Timer _idle;
 
     internal ShaderCompiler(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
     {
+        // Tracked in creation order, so on disposal the stop below runs first, then the slots, then the meter.
+        Track(_meter);
+        Track(_compiling);
         _assets = assets;
         _caches = caches;
         _settings = settings;
@@ -139,32 +136,30 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
             if (taken > 0)
                 _compiling.Release(taken);
         });
+
+        // The compiles already running finish, then the timer stops, a release it began finishing, before the workers
+        // are freed. Waiting for them is safe: the frame loop has ended, and neither needs an engine thread.
+        Track(() =>
+        {
+            for (int i = 0; i < _workerCount; i++)
+            {
+                _compiling.Wait();
+            }
+
+            using (ManualResetEvent stopped = new(false))
+            {
+                _idle.Dispose(stopped);
+                stopped.WaitOne();
+            }
+
+            ReleaseWorkers();
+        });
     }
 
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
     public int Version => 4;
-
-    public void Dispose()
-    {
-        // The compiles already running finish, then the timer stops, a release it began finishing, before the workers
-        // are freed. Waiting for them is safe: the frame loop has ended, and neither needs an engine thread.
-        for (int i = 0; i < _workerCount; i++)
-        {
-            _compiling.Wait();
-        }
-
-        using (ManualResetEvent stopped = new(false))
-        {
-            _idle.Dispose(stopped);
-            stopped.WaitOne();
-        }
-
-        ReleaseWorkers();
-        _compiling.Dispose();
-        _meter.Dispose();
-    }
 
     public async Task<Result<CompiledShader>> CompileAsync(ShaderEntry entry, CancellationToken cancel)
     {

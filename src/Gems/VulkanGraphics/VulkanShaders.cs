@@ -35,18 +35,21 @@ internal sealed class VulkanShader
 /// that no pass asks for in <see cref="UnusedFrames"/> frames is destroyed. Call it only on the render thread. The
 /// compiles run on a worker.
 /// </remarks>
-internal sealed class VulkanShaders(
-    IShaderCompiler compiler,
-    VulkanResources resources,
-    VulkanFrames frames,
-    Threads threads
-) : IDisposable
+internal sealed class VulkanShaders : Disposable
 {
     /// <summary>
     /// How many frames in a row a draw or bound shader's pipeline may go unasked for before it is destroyed: about ten
     /// seconds at 60 frames a second, so a pass that pauses does not build its pipeline again.
     /// </summary>
     private const int UnusedFrames = 600;
+
+    private readonly IShaderCompiler _compiler;
+
+    private readonly VulkanResources _resources;
+
+    private readonly VulkanFrames _frames;
+
+    private readonly Threads _threads;
 
     private readonly Dictionary<ShaderEntry, VulkanShader> _shaders = [];
 
@@ -66,10 +69,16 @@ internal sealed class VulkanShaders(
     /// </summary>
     private readonly CancellationTokenSource _stopping = new();
 
-    public void Dispose()
+    public VulkanShaders(IShaderCompiler compiler, VulkanResources resources, VulkanFrames frames, Threads threads)
     {
-        _stopping.Cancel();
-        _stopping.Dispose();
+        _compiler = compiler;
+        _resources = resources;
+        _frames = frames;
+        _threads = threads;
+
+        // Tracked items run last first, so the cancel comes before the dispose.
+        Track(_stopping);
+        Track(_stopping.Cancel);
     }
 
     public GpuState GetState(in ShaderEntry entry) => GetOrStart(entry).State;
@@ -88,12 +97,12 @@ internal sealed class VulkanShaders(
         if (TryAsk(_boundPipelines, shader.Spirv) is { } kept)
             return kept;
 
-        Result<GpuPipeline> made = resources.CreatePipeline(shader);
+        Result<GpuPipeline> made = _resources.CreatePipeline(shader);
         if (!made.Ok)
             Log.Error($"The passes that run {shader.EntryPoint} are left out: {made.Error}");
 
         GpuPipeline pipeline = made.Ok ? made.Value : GpuPipeline.None;
-        _boundPipelines[shader.Spirv] = new Asked(pipeline, frames.Current.Serial);
+        _boundPipelines[shader.Spirv] = new Asked(pipeline, _frames.Current.Serial);
 
         return pipeline;
     }
@@ -126,7 +135,7 @@ internal sealed class VulkanShaders(
             formats.Add(GetFormat(color));
         }
 
-        Result<GpuPipeline> made = resources.CreatePipeline(
+        Result<GpuPipeline> made = _resources.CreatePipeline(
             new GraphicsPipelineDescription
             {
                 VertexSpirv = vertex.Spirv,
@@ -149,7 +158,7 @@ internal sealed class VulkanShaders(
         }
 
         GpuPipeline pipeline = made.Ok ? made.Value : GpuPipeline.None;
-        _drawPipelines[(shaders, colors, depth)] = new Asked(pipeline, frames.Current.Serial);
+        _drawPipelines[(shaders, colors, depth)] = new Asked(pipeline, _frames.Current.Serial);
 
         return pipeline;
     }
@@ -163,7 +172,7 @@ internal sealed class VulkanShaders(
         int destroyed = DestroyUnasked(_drawPipelines) + DestroyUnasked(_boundPipelines);
         if (destroyed > 0)
         {
-            int live = resources.Pipelines.Items.Count();
+            int live = _resources.Pipelines.Items.Count();
             Log.Info($"Destroyed {destroyed} pipelines unasked for {UnusedFrames} frames; {live} live.");
         }
     }
@@ -172,17 +181,17 @@ internal sealed class VulkanShaders(
         where TKey : notnull
     {
         int destroyed = 0;
-        ulong frame = frames.Current.Serial;
+        ulong frame = _frames.Current.Serial;
         foreach ((TKey key, Asked entry) in pipelines)
         {
             if (frame - entry.Frame < UnusedFrames)
                 continue;
 
             pipelines.Remove(key);
-            if (resources.Pipelines.Remove(entry.Pipeline.Id) is not { } removed)
+            if (_resources.Pipelines.Remove(entry.Pipeline.Id) is not { } removed)
                 continue;
 
-            frames.Current.Trash.Add(new(entry.Pipeline.Id, removed));
+            _frames.Current.Trash.Add(new(entry.Pipeline.Id, removed));
             destroyed++;
         }
 
@@ -199,13 +208,13 @@ internal sealed class VulkanShaders(
         if (Unsafe.IsNullRef(ref kept))
             return null;
 
-        kept.Frame = frames.Current.Serial;
+        kept.Frame = _frames.Current.Serial;
 
         return kept.Pipeline;
     }
 
     private GpuFormat GetFormat(in GpuTarget target) =>
-        resources.Textures[target.Texture.Id]?.Description.Format ?? GpuFormat.Unknown;
+        _resources.Textures[target.Texture.Id]?.Description.Format ?? GpuFormat.Unknown;
 
     private VulkanShader GetOrStart(in ShaderEntry entry)
     {
@@ -228,14 +237,14 @@ internal sealed class VulkanShaders(
         Result<CompiledShader> compiled;
         try
         {
-            compiled = await Task.Run(() => compiler.CompileAsync(entry, stopping), stopping).ConfigureAwait(false);
+            compiled = await Task.Run(() => _compiler.CompileAsync(entry, stopping), stopping).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             compiled = Result.Failure($"{entry.Name} did not compile: the compiler threw: {ex}");
         }
 
-        await threads.Enter(EngineThread.Render);
+        await _threads.Enter(EngineThread.Render);
         if (stopping.IsCancellationRequested)
             return;
 
@@ -263,7 +272,7 @@ internal sealed class VulkanShaders(
         if (compiled.GroupSizeX == 0)
             return Result.Failure("it reported no group size.");
 
-        Result<GpuPipeline> pipeline = resources.CreatePipeline(
+        Result<GpuPipeline> pipeline = _resources.CreatePipeline(
             new ComputePipelineDescription
             {
                 Spirv = compiled.Spirv,

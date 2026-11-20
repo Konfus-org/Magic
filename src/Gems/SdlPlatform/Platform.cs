@@ -15,7 +15,7 @@ namespace Magic.SdlPlatform;
 /// <remarks>
 /// It also measures the RAM that the process holds.
 /// </remarks>
-public sealed class Platform : IPlatform, IDisposable
+public sealed class Platform : Disposable, IPlatform
 {
     /// <summary>
     /// The longest a pump waits for the OS's next event, so what was handed to the platform thread is never kept
@@ -34,6 +34,7 @@ public sealed class Platform : IPlatform, IDisposable
         // The gem's meter goes with it, so nothing holds the gem's code once it unloads. The OS is asked only when the
         // meter is read, as the number is the process's rather than a frame's.
         _meter = new Meter("Magic.Gems.SdlPlatform");
+        Track(_meter);
         _meter.CreateObservableGauge<long>(
             "magic.gems.sdl_platform.process.memory.usage",
             () => ProcessMemory.GetPrivateResidentBytes(files) is { } bytes ? [new(bytes)] : [],
@@ -41,8 +42,6 @@ public sealed class Platform : IPlatform, IDisposable
             "RAM only this process holds, as the OS's tools show it."
         );
     }
-
-    public void Dispose() => _meter.Dispose();
 
     /// <summary>
     /// Gives the window and clipboard what the game thread set, then hands the game thread the SDL events since the

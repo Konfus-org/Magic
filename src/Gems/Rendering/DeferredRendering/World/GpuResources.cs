@@ -129,11 +129,11 @@ internal sealed class GpuResources(
     /// <remarks>
     /// When it changes, a renderer waiting for its model may draw now, and every row is built again.
     /// </remarks>
-    public int SettledModels { get; private set; }
+    internal int SettledModels { get; private set; }
 
-    public GpuBuffer VertexPool { get; private set; }
+    internal GpuBuffer VertexPool { get; private set; }
 
-    public GpuBuffer IndexPool { get; private set; }
+    internal GpuBuffer IndexPool { get; private set; }
 
     /// <summary>
     /// Every resident model's meshes as rays see them, a <see cref="GpuMesh"/> a row; none on a GPU that traces no
@@ -143,24 +143,24 @@ internal sealed class GpuResources(
     /// A model's meshes start at its <see cref="ModelPlace.MeshOffset"/>, in the order of its
     /// <see cref="ModelPlace.Meshes"/>.
     /// </remarks>
-    public GpuBuffer Meshes { get; private set; }
+    internal GpuBuffer Meshes { get; private set; }
 
     /// <summary>
     /// Each resident model by its model index, the one its instances name, up to the last row in use; none where no
     /// model is.
     /// </summary>
-    public ReadOnlyMemory<ModelPlace> Models => _models.AsMemory(0, _modelRows.End);
+    internal ReadOnlyMemory<ModelPlace> Models => _models.AsMemory(0, _modelRows.End);
 
     /// <summary>
     /// The material shaders rows are drawn with, each as a resolve pass specialises to it, in the order a row numbers
     /// them.
     /// </summary>
-    public IReadOnlyList<ShaderTypeArgument> MaterialShaders => _materialShaders;
+    internal IReadOnlyList<ShaderTypeArgument> MaterialShaders => _materialShaders;
 
     /// <summary>
     /// Whether a material shader read so far draws translucent: the view keeps its glass targets while one does.
     /// </summary>
-    public bool HasTranslucent
+    internal bool HasTranslucent
     {
         get
         {
@@ -178,7 +178,7 @@ internal sealed class GpuResources(
     /// Gets a material param's texture, its render texture or else its texture, as the one delegate that the world
     /// hands on and each row is packed with, so a frame makes no delegate.
     /// </summary>
-    public TextureLookup GetTexture => field ??= Get;
+    internal TextureLookup GetTexture => field ??= Get;
 
     /// <summary>
     /// Gets every material's texture on the GPU, which shaders read through the heap by the id in a row.
@@ -186,7 +186,7 @@ internal sealed class GpuResources(
     /// <remarks>
     /// A pass that samples them names them in its reads, so each is readable, its copy done, before the pass runs.
     /// </remarks>
-    public ImmutableArray<GpuResource> GetHeapTextures()
+    internal ImmutableArray<GpuResource> GetHeapTextures()
     {
         ImmutableArray<GpuResource>.Builder textures = ImmutableArray.CreateBuilder<GpuResource>();
         foreach (TextureEntry entry in _textures.Values)
@@ -205,7 +205,7 @@ internal sealed class GpuResources(
     /// Call it every frame before any renderer's row is built, so what the pools hold stays. The models take their
     /// ranges first, so a pool they grow is asked for at its new size before they are copied into it.
     /// </remarks>
-    public Result Prepare(RenderGraph graph)
+    internal Result Prepare(RenderGraph graph)
     {
         // The mesh table first, on a GPU that traces rays, so a model placed takes a range of it only there.
         if (gpu.Features.HasRayQuery)
@@ -361,7 +361,7 @@ internal sealed class GpuResources(
     /// their rows were built ask for nothing, so once a model looks unused each model <paramref name="drawn"/> holds is
     /// asked for first.
     /// </remarks>
-    public void EvictUnusedModels(ReadOnlySpan<Ecs.Components.Renderer> drawn, long frameStart, int keepSec)
+    internal void EvictUnusedModels(ReadOnlySpan<Ecs.Components.Renderer> drawn, long frameStart, int keepSec)
     {
         long before = frameStart - (keepSec * 1000L);
         bool hasUnused = false;
@@ -403,7 +403,7 @@ internal sealed class GpuResources(
     /// <summary>
     /// Whether the texture is on the GPU, and its heap ids when it is; the first ask starts reading it.
     /// </summary>
-    public GpuState Get(Handle<Texture> handle, out uint texture, out uint sampler)
+    internal GpuState Get(Handle<Texture> handle, out uint texture, out uint sampler)
     {
         if (!_textures.TryGetValue(handle.Id, out TextureEntry? entry))
         {
@@ -423,7 +423,7 @@ internal sealed class GpuResources(
     /// The render texture on the GPU, which a camera draws into and a material samples as it would a texture, or none
     /// until it is made; the first ask starts reading its size. It is among the textures, under its own id.
     /// </summary>
-    public GpuTexture Get(Handle<RenderTexture> handle)
+    internal GpuTexture Get(Handle<RenderTexture> handle)
     {
         if (!_textures.TryGetValue(handle.Id, out TextureEntry? entry))
         {
@@ -439,7 +439,7 @@ internal sealed class GpuResources(
     /// Whether the material, its shader's struct and the textures it names are on the GPU, or one of them failed; the
     /// first ask starts loading it.
     /// </summary>
-    public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _, out _);
+    internal GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _, out _);
 
     /// <summary>
     /// Gets whether the slot's material, its shader's struct and its textures are on the GPU, the row its params make,
@@ -451,7 +451,7 @@ internal sealed class GpuResources(
     /// ask starts loading the material. The row names its shader by its place in <see cref="MaterialShaders"/>, which
     /// it takes on the first row that names it.
     /// </remarks>
-    public GpuState Get(
+    internal GpuState Get(
         in MaterialInstance slot,
         out GpuMaterial row,
         out (FailureKind Kind, ulong Asset, string? Param)? failure
@@ -472,7 +472,7 @@ internal sealed class GpuResources(
     /// failure cube, marked so, and nothing when the cube could not be made either. The cube is made from memory, not
     /// read.
     /// </remarks>
-    public ResidentModel? Get(Handle<Model> model)
+    internal ResidentModel? Get(Handle<Model> model)
     {
         if (HasFailed(model))
         {
@@ -504,7 +504,7 @@ internal sealed class GpuResources(
     /// That is a material, a texture, a material shader's struct, which is reflected again now, and a model that
     /// failed. A model in the pools stays as it was made until it is evicted.
     /// </remarks>
-    public void Forget(ulong id)
+    internal void Forget(ulong id)
     {
         _materials.Remove(id);
         _textures.Remove(id);
@@ -530,20 +530,20 @@ internal sealed class GpuResources(
     /// A model that could not be made has arrived once the failure cube it is drawn as has arrived in its place, or
     /// could not be made either.
     /// </remarks>
-    public bool HasArrived(Handle<Model> model) =>
+    internal bool HasArrived(Handle<Model> model) =>
         _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Ready
         || (HasFailed(model) && (HasFailed(FailureCube.Handle) || HasArrived(FailureCube.Handle)));
 
     /// <summary>
     /// Whether the model could not be made, and is drawn as the failure cube.
     /// </summary>
-    public bool HasFailed(Handle<Model> model) => _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Failed;
+    internal bool HasFailed(Handle<Model> model) => _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Failed;
 
     /// <summary>
     /// Asks for every texture read and its sampler, and copies the levels of the textures that arrived, in the frame's
     /// upload pass.
     /// </summary>
-    public void Upload(RenderGraph graph)
+    internal void Upload(RenderGraph graph)
     {
         // Each texture read and its sampler asked for, and ready with their heap ids; failed, and drawn as stripes over
         // its material, when either was not made.

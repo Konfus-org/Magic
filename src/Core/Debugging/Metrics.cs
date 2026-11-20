@@ -42,6 +42,11 @@ public static class Metrics
     public const string StepTag = "magic.core.step";
 
     /// <summary>
+    /// The phase of a load that a duration measures.
+    /// </summary>
+    public const string PhaseTag = "magic.core.phase";
+
+    /// <summary>
     /// One phase of an asset's load, tagged with <see cref="TypeTag"/> and <see cref="PhaseTag"/>.
     /// </summary>
     public const string AssetLoadDuration = "magic.core.assets.load.duration";
@@ -60,11 +65,6 @@ public static class Metrics
     /// The asset type that a load phase belongs to.
     /// </summary>
     public const string TypeTag = "magic.core.assets.type";
-
-    /// <summary>
-    /// The phase of a load that a duration measures.
-    /// </summary>
-    public const string PhaseTag = "magic.core.phase";
 
     internal static Meter Meter { get; } = new("Magic.Core");
 

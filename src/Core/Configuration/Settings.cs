@@ -85,12 +85,6 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// The settings that the gem with <typeparamref name="TSettings"/> runs with; with no such gem, what it would get.
-    /// </summary>
-    public TSettings Get<TSettings>()
-        where TSettings : ISettings => (TSettings)Get(typeof(TSettings));
-
-    /// <summary>
     /// Writes each member of <paramref name="settings"/> on the settings of the gem with
     /// <typeparamref name="TSettings"/>, and keeps them for when the gem is made again.
     /// </summary>
@@ -188,6 +182,12 @@ public sealed class Settings
 
         return Result.Success();
     }
+
+    /// <summary>
+    /// The settings that the gem with <typeparamref name="TSettings"/> runs with; with no such gem, what it would get.
+    /// </summary>
+    public TSettings Get<TSettings>()
+        where TSettings : ISettings => (TSettings)Get(typeof(TSettings));
 
     /// <summary>
     /// <see cref="Get{TSettings}"/> of a type known only at run time, as the services hand it to a gem's constructor.

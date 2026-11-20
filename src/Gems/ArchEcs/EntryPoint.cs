@@ -1,14 +1,19 @@
 using Magic.Projects;
 using Magic.Threading;
+using Magic.Utils;
 
 namespace Magic.ArchEcs;
 
 /// <summary>
 /// The gem: it makes the entity world, <see cref="Ecs"/>.
 /// </summary>
-public sealed class EntryPoint(Threads threads) : IGem, IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
-    public Ecs Ecs { get; } = new(threads);
+    public EntryPoint(Threads threads)
+    {
+        Ecs = new Ecs(threads);
+        Track(Ecs);
+    }
 
-    public void Dispose() => Ecs.Dispose();
+    public Ecs Ecs { get; }
 }

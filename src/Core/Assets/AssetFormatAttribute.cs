@@ -5,7 +5,7 @@ namespace Magic.Assets;
 /// <summary>
 /// How Core reads an asset type's files itself, whatever their extension.
 /// </summary>
-public enum AssetFileFormat : byte
+internal enum AssetFileFormat : byte
 {
     /// <summary>
     /// The file is the type as JSON, in Core's one dialect, with what its <c>.meta</c> sets over it.
@@ -24,7 +24,7 @@ public enum AssetFileFormat : byte
 /// <see cref="IAssetImporter{T}"/> a gem provides for it.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class AssetFormatAttribute(AssetFileFormat format) : Attribute
+internal sealed class AssetFormatAttribute(AssetFileFormat format) : Attribute
 {
     public AssetFileFormat Format { get; } = format;
 }

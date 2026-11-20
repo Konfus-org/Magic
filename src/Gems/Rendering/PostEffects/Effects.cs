@@ -71,7 +71,7 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
     /// Resolves each place of <paramref name="list"/>, its textures got through <paramref name="textures"/>, and
     /// uploads their rows.
     /// </summary>
-    public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(
+    internal Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(
         in RenderFrame frame,
         RenderGraph graph,
         MaterialSlots list,
@@ -98,7 +98,7 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
     /// <summary>
     /// Whether any of <paramref name="list"/>'s effects is still loading, its material, its textures or its passes.
     /// </summary>
-    public bool IsLoading(in RenderFrame frame, MaterialSlots list, TextureLookup textures)
+    internal bool IsLoading(in RenderFrame frame, MaterialSlots list, TextureLookup textures)
     {
         Span<uint> words = stackalloc uint[RowWords - 1];
         bool isLoading = false;
@@ -116,7 +116,7 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
     /// <remarks>
     /// That is a material, and an effect shader's struct, which is reflected again now.
     /// </remarks>
-    public void Forget(ulong id)
+    internal void Forget(ulong id)
     {
         _materials.Remove(id);
         _misfits.Clear();

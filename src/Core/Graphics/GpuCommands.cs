@@ -57,8 +57,6 @@ public readonly record struct GpuPass
         : Shader is not null || BoundShader is not null ? GpuPassKind.Compute
         : GpuPassKind.Transfer;
 
-    public RenderStage Stage { get; init; }
-
     public ImmutableArray<GpuUse> Uses { get; init; } = [];
 
     public ImmutableArray<GpuCommand> Commands { get; init; } = [];
@@ -82,6 +80,8 @@ public readonly record struct GpuPass
     /// The shaders of a draw pass, bound before the commands.
     /// </summary>
     public DrawShaders? DrawShaders { get; init; }
+
+    internal RenderStage Stage { get; init; }
 }
 
 /// <summary>

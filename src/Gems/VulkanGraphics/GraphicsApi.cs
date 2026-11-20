@@ -24,7 +24,7 @@ namespace Magic.VulkanGraphics;
 /// next frame. The first frame begins when the object is made. To begin a frame, it waits for the frame two before,
 /// gets the window's image, and empties the staging ring for what records next.
 /// </remarks>
-public sealed class GraphicsApi : IGraphicsApi, IHookIntoDomainLoading, IDisposable
+public sealed class GraphicsApi : Disposable, IGraphicsApi, IHookIntoDomainLoading
 {
     /// <summary>
     /// How many frames in a row a named resource may go unasked for before it is destroyed.
@@ -164,23 +164,6 @@ public sealed class GraphicsApi : IGraphicsApi, IHookIntoDomainLoading, IDisposa
 #else
         false;
 #endif
-
-    public void Dispose()
-    {
-        // A capture that is still open ends first: RenderDoc leaves overlapping captures undefined.
-        if (_captureFramesLeft > 0 && _renderDoc is not null)
-            EndCapture(_renderDoc);
-
-        _shaders.Dispose();
-        _swapchain?.Dispose();
-        _frames.Dispose();
-        _resources.Dispose();
-        _heap.Dispose();
-        SavePipelineCache();
-        _pipelineCache.Dispose();
-        _device.Dispose();
-        _meter.Dispose();
-    }
 
     /// <summary>
     /// Keeps the pipelines built so far for the next run, in the background, when a world arrived: the first draws of
@@ -384,6 +367,28 @@ public sealed class GraphicsApi : IGraphicsApi, IHookIntoDomainLoading, IDisposa
         described["isSyncValidating"] = _device.HasSyncValidation;
 
         return described;
+    }
+
+    // Not tracked: the parts go in an order that reverse creation would break, with a save between them.
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        // A capture that is still open ends first: RenderDoc leaves overlapping captures undefined.
+        if (_captureFramesLeft > 0 && _renderDoc is not null)
+            EndCapture(_renderDoc);
+
+        _shaders.Dispose();
+        _swapchain?.Dispose();
+        _frames.Dispose();
+        _resources.Dispose();
+        _heap.Dispose();
+        SavePipelineCache();
+        _pipelineCache.Dispose();
+        _device.Dispose();
+        _meter.Dispose();
+        base.Dispose(disposing);
     }
 
     /// <summary>

@@ -53,7 +53,7 @@ namespace Magic.Assets;
 /// settle, so two calls in one frame can see different assets, but each sees a whole one.
 /// </para>
 /// </remarks>
-public sealed class AssetManager : IDisposable
+public sealed class AssetManager : Disposable
 {
     /// <summary>
     /// Every level of dependencies or dependents, however deep: what a crawl's <c>levels</c> takes for all of them.
@@ -85,7 +85,7 @@ public sealed class AssetManager : IDisposable
     private readonly SourceVersions _versions;
 
     /// <summary>
-    /// The cache writes that run in the background, which <see cref="Dispose"/> waits for.
+    /// The cache writes that run in the background, which <see cref="Dispose(bool)"/> waits for.
     /// </summary>
     private readonly ConcurrentDictionary<Task, byte> _writes = new();
 
@@ -118,7 +118,7 @@ public sealed class AssetManager : IDisposable
         _app = app;
         _scans = new AssetScans(files);
         _watches = new AssetWatches(files, this);
-        _versions = new SourceVersions(files, caches);
+        _versions = Track(new SourceVersions(files, caches));
         BuiltIn = GetResources(files, typeof(AssetManager).Assembly, AppContext.BaseDirectory);
         Register(BuiltIn);
         Register(typeof(AssetManager).Assembly);
@@ -159,44 +159,6 @@ public sealed class AssetManager : IDisposable
     /// Magic's built-in <c>Resources/</c>: where the defaults are, and only there.
     /// </summary>
     internal string BuiltIn { get; }
-
-    /// <summary>
-    /// Where the part built as <paramref name="assembly"/> keeps its own assets.
-    /// </summary>
-    /// <remarks>
-    /// Every build but a release records the folder: its source <c>Resources/</c>. Else it is <c>Resources/</c> in
-    /// <paramref name="folder"/>, the folder of the assembly, where a release copies them.
-    /// </remarks>
-    public static string GetResources(IFileSystem files, Assembly assembly, string folder) =>
-        assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
-
-    /// <summary>
-    /// Stops the watching.
-    /// </summary>
-    /// <remarks>
-    /// Only the host calls it, at the end of the run, on its thread. The loads in progress stopped with the run's
-    /// <see cref="App.Lifetime"/>, and a load that lands after it is dropped. A load that is still awaited ends
-    /// cancelled, and so does a load asked for after it.
-    /// </remarks>
-    public void Dispose()
-    {
-        _watches.Dispose();
-        List<TaskCompletionSource<Made>> waiting;
-        lock (_gate)
-        {
-            waiting = [.. Loaded.Entries.Values.SelectMany(entry => entry.Waiting)];
-        }
-
-        foreach (TaskCompletionSource<Made> waiter in waiting)
-        {
-            waiter.TrySetCanceled(_app.Lifetime);
-        }
-
-        // A write that the run leaves half done is a temporary file that the next run ignores; a short wait keeps the
-        // entries that are nearly written.
-        WaitForWrites();
-        _versions.Dispose();
-    }
 
     /// <summary>
     /// The <typeparamref name="T"/> at <paramref name="path"/>, or none when no asset there is one.
@@ -281,31 +243,6 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them.
-    /// </summary>
-    public ImmutableArray<string> GetPaths(string folder) =>
-        Database.Index.ByFolder.TryGetValue(folder, out ImmutableArray<string> paths) ? paths : [];
-
-    /// <summary>
-    /// The paths of the assets in <paramref name="folder"/> and every folder under it, as <see cref="Find{T}"/>
-    /// takes them.
-    /// </summary>
-    public ImmutableArray<string> GetPathsUnder(string folder)
-    {
-        ImmutableArray<string>.Builder paths = ImmutableArray.CreateBuilder<string>();
-        foreach ((string indexed, ImmutableArray<string> files) in Database.Index.ByFolder)
-        {
-            bool isUnder =
-                indexed.Equals(folder, StringComparison.OrdinalIgnoreCase)
-                || indexed.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase);
-            if (isUnder)
-                paths.AddRange(files);
-        }
-
-        return paths.ToImmutable();
-    }
-
-    /// <summary>
     /// The paths of the assets directly in the folder of <paramref name="file"/>, as <see cref="Find{T}"/> takes them,
     /// such as the prefabs of a domain.
     /// </summary>
@@ -340,59 +277,6 @@ public sealed class AssetManager : IDisposable
         Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path
         : Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered) ? registered.Path
         : null;
-
-    /// <summary>
-    /// Which make of <paramref name="asset"/> a load gets: a hash of its file, its <c>.meta</c> and its importer's
-    /// version; 0 when no file has it.
-    /// </summary>
-    /// <remarks>
-    /// Compare it with the version that an asset was loaded at to know whether to load it again.
-    /// </remarks>
-    public ulong GetVersion<T>(Handle<T> asset)
-        where T : IAsset<T>
-    {
-        if (Loaded.Entries.TryGetValue(asset.Id, out AssetEntry? entry) && entry.Current is { } kept)
-            return kept.Version;
-
-        if (!Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
-            return 0;
-
-        int importer = Loaded.Importers.GetValueOrDefault(typeof(T)) is IAssetImporter<T> reader ? reader.Version : 0;
-        SourceVersions.Lookup lookup = _versions.Find(file.File, file.Settings, importer);
-        if (lookup.Hit)
-            return lookup.Version;
-
-        Result<byte[]> bytes = Files.ReadBytes(file.File);
-        if (!bytes.Ok)
-            return 0;
-
-        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings, importer);
-        _versions.Remember(lookup, version);
-
-        return version;
-    }
-
-    /// <summary>
-    /// The ids of what <paramref name="asset"/> holds handles to or was made from, down to <paramref name="levels"/>
-    /// levels: 1 for its own, <see cref="AllLevels"/> for all.
-    /// </summary>
-    /// <remarks>
-    /// It gives only what is known now, from what has loaded or been found. To read what has not, use
-    /// <see cref="FindDependenciesAsync{TAsset}"/>.
-    /// </remarks>
-    public ImmutableArray<ulong> GetDependencies<T>(Handle<T> asset, int levels)
-        where T : IAsset<T> => [.. Database.GetDependencies(asset.Id, levels)];
-
-    /// <summary>
-    /// The ids of what holds handles to <paramref name="asset"/> or was made from it, up to <paramref name="levels"/>
-    /// levels: 1 for what names it, <see cref="AllLevels"/> for all.
-    /// </summary>
-    /// <remarks>
-    /// It gives only what is known now, from what has loaded or been found. To read what has not, use
-    /// <see cref="FindDependentsAsync{TAsset}"/>.
-    /// </remarks>
-    public ImmutableArray<ulong> GetDependents<T>(Handle<T> asset, int levels)
-        where T : IAsset<T> => [.. Database.GetDependents(asset.Id, levels)];
 
     /// <summary>
     /// Loads the asset, or tells why it could not be loaded.
@@ -438,63 +322,6 @@ public sealed class AssetManager : IDisposable
             .ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
-    }
-
-    /// <summary>
-    /// The ids of what <paramref name="asset"/> depends on as the files name them, down to <paramref name="levels"/>
-    /// levels, or why one could not be read.
-    /// </summary>
-    /// <remarks>
-    /// 1 gives what it names itself, <see cref="AllLevels"/> everything under it. For a type that Core reads, it reads
-    /// the file. For a type that a gem reads, it uses what the last import kept, else it loads the asset.
-    /// </remarks>
-    public Task<Result<ImmutableArray<ulong>>> FindDependenciesAsync<TAsset>(
-        Handle<TAsset> asset,
-        int levels,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependenciesAsync(this, asset.Id, levels, progress, cancel);
-
-    /// <summary>
-    /// The ids of what depends on <paramref name="asset"/> as the files under the asset directories name it, up to
-    /// <paramref name="levels"/> levels.
-    /// </summary>
-    /// <remarks>
-    /// 1 gives what names it itself, <see cref="AllLevels"/> everything above it. The first call goes through every
-    /// asset. For a type that Core reads, it reads the file. For a type that a gem reads, it uses what the last import
-    /// kept, else it loads the asset. An asset that cannot be read counts as one that depends on nothing.
-    /// </remarks>
-    public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
-        Handle<TAsset> asset,
-        int levels,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependentsAsync(this, asset.Id, levels, progress, cancel);
-
-    /// <summary>
-    /// Loads what <paramref name="asset"/> depends on, down to <paramref name="levels"/> levels: their ids, or why one
-    /// could not be found or loaded.
-    /// </summary>
-    /// <remarks>
-    /// It finds them as <see cref="FindDependenciesAsync{TAsset}"/> does, and loads each as the type its <c>.meta</c>
-    /// names.
-    /// </remarks>
-    public async Task<Result<ImmutableArray<ulong>>> LoadDependenciesAsync<TAsset>(
-        Handle<TAsset> asset,
-        int levels,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where TAsset : IAsset<TAsset>
-    {
-        Result<ImmutableArray<ulong>> found = await FindDependenciesAsync(asset, levels, progress, cancel)
-            .ConfigureAwait(false);
-
-        return found.Ok
-            ? await AssetCrawl.LoadAllAsync(this, found.Value, progress, cancel).ConfigureAwait(false)
-            : found;
     }
 
     /// <summary>
@@ -609,6 +436,187 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
+    /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, with no sidecar, or tells why
+    /// it could not.
+    /// </summary>
+    /// <remarks>
+    /// With no sidecar, the file is not an asset. The <see cref="IAssetExporter{T}"/> that a gem gives for the type
+    /// writes it, or Core writes it for a type marked <see cref="AssetFormatAttribute"/>. The path ends in the
+    /// exporter's extension. A value that holds the default of its type is left out, unless
+    /// <paramref name="includesDefaults"/> asks for every value. Any thread.
+    /// </remarks>
+    public async Task<Result> ExportAsync<T>(
+        T asset,
+        string file,
+        bool includesDefaults,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        ArgumentNullException.ThrowIfNull(file);
+
+        Result<ReadOnlyMemory<byte>> bytes;
+        if (Loaded.Exporters.GetValueOrDefault(typeof(T)) is IAssetExporter<T> exporter)
+        {
+            if (!file.EndsWith(exporter.Extension, StringComparison.OrdinalIgnoreCase))
+                return Result.Failure($"a {typeof(T).Name}'s file ends in {exporter.Extension}, not {file}.");
+
+            bytes = await exporter.ExportAsync(asset, includesDefaults, progress, cancel).ConfigureAwait(false);
+        }
+        else if (typeof(T).GetCustomAttribute<AssetFormatAttribute>() is { } format)
+        {
+            bytes = await Task.Run(() => WriteCoreFormat(asset, format.Format, includesDefaults), cancel)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            return Result.Failure($"no gem the project lists writes {typeof(T).Name}s.");
+        }
+
+        if (!bytes.Ok)
+            return Result.Failure(bytes.Error);
+
+        return await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them.
+    /// </summary>
+    public ImmutableArray<string> GetPaths(string folder) =>
+        Database.Index.ByFolder.TryGetValue(folder, out ImmutableArray<string> paths) ? paths : [];
+
+    /// <summary>
+    /// The paths of the assets in <paramref name="folder"/> and every folder under it, as <see cref="Find{T}"/>
+    /// takes them.
+    /// </summary>
+    public ImmutableArray<string> GetPathsUnder(string folder)
+    {
+        ImmutableArray<string>.Builder paths = ImmutableArray.CreateBuilder<string>();
+        foreach ((string indexed, ImmutableArray<string> files) in Database.Index.ByFolder)
+        {
+            bool isUnder =
+                indexed.Equals(folder, StringComparison.OrdinalIgnoreCase)
+                || indexed.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase);
+            if (isUnder)
+                paths.AddRange(files);
+        }
+
+        return paths.ToImmutable();
+    }
+
+    /// <summary>
+    /// Which make of <paramref name="asset"/> a load gets: a hash of its file, its <c>.meta</c> and its importer's
+    /// version; 0 when no file has it.
+    /// </summary>
+    /// <remarks>
+    /// Compare it with the version that an asset was loaded at to know whether to load it again.
+    /// </remarks>
+    public ulong GetVersion<T>(Handle<T> asset)
+        where T : IAsset<T>
+    {
+        if (Loaded.Entries.TryGetValue(asset.Id, out AssetEntry? entry) && entry.Current is { } kept)
+            return kept.Version;
+
+        if (!Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
+            return 0;
+
+        int importer = Loaded.Importers.GetValueOrDefault(typeof(T)) is IAssetImporter<T> reader ? reader.Version : 0;
+        SourceVersions.Lookup lookup = _versions.Find(file.File, file.Settings, importer);
+        if (lookup.Hit)
+            return lookup.Version;
+
+        Result<byte[]> bytes = Files.ReadBytes(file.File);
+        if (!bytes.Ok)
+            return 0;
+
+        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings, importer);
+        _versions.Remember(lookup, version);
+
+        return version;
+    }
+
+    /// <summary>
+    /// The ids of what <paramref name="asset"/> holds handles to or was made from, down to <paramref name="levels"/>
+    /// levels: 1 for its own, <see cref="AllLevels"/> for all.
+    /// </summary>
+    /// <remarks>
+    /// It gives only what is known now, from what has loaded or been found. To read what has not, use
+    /// <see cref="FindDependenciesAsync{TAsset}"/>.
+    /// </remarks>
+    public ImmutableArray<ulong> GetDependencies<T>(Handle<T> asset, int levels)
+        where T : IAsset<T> => [.. Database.GetDependencies(asset.Id, levels)];
+
+    /// <summary>
+    /// The ids of what holds handles to <paramref name="asset"/> or was made from it, up to <paramref name="levels"/>
+    /// levels: 1 for what names it, <see cref="AllLevels"/> for all.
+    /// </summary>
+    /// <remarks>
+    /// It gives only what is known now, from what has loaded or been found. To read what has not, use
+    /// <see cref="FindDependentsAsync{TAsset}"/>.
+    /// </remarks>
+    public ImmutableArray<ulong> GetDependents<T>(Handle<T> asset, int levels)
+        where T : IAsset<T> => [.. Database.GetDependents(asset.Id, levels)];
+
+    /// <summary>
+    /// The ids of what <paramref name="asset"/> depends on as the files name them, down to <paramref name="levels"/>
+    /// levels, or why one could not be read.
+    /// </summary>
+    /// <remarks>
+    /// 1 gives what it names itself, <see cref="AllLevels"/> everything under it. For a type that Core reads, it reads
+    /// the file. For a type that a gem reads, it uses what the last import kept, else it loads the asset.
+    /// </remarks>
+    public Task<Result<ImmutableArray<ulong>>> FindDependenciesAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependenciesAsync(this, asset.Id, levels, progress, cancel);
+
+    /// <summary>
+    /// The ids of what depends on <paramref name="asset"/> as the files under the asset directories name it, up to
+    /// <paramref name="levels"/> levels.
+    /// </summary>
+    /// <remarks>
+    /// 1 gives what names it itself, <see cref="AllLevels"/> everything above it. The first call goes through every
+    /// asset. For a type that Core reads, it reads the file. For a type that a gem reads, it uses what the last import
+    /// kept, else it loads the asset. An asset that cannot be read counts as one that depends on nothing.
+    /// </remarks>
+    public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependentsAsync(this, asset.Id, levels, progress, cancel);
+
+    /// <summary>
+    /// Loads what <paramref name="asset"/> depends on, down to <paramref name="levels"/> levels: their ids, or why one
+    /// could not be found or loaded.
+    /// </summary>
+    /// <remarks>
+    /// It finds them as <see cref="FindDependenciesAsync{TAsset}"/> does, and loads each as the type its <c>.meta</c>
+    /// names.
+    /// </remarks>
+    public async Task<Result<ImmutableArray<ulong>>> LoadDependenciesAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset>
+    {
+        Result<ImmutableArray<ulong>> found = await FindDependenciesAsync(asset, levels, progress, cancel)
+            .ConfigureAwait(false);
+
+        return found.Ok
+            ? await AssetCrawl.LoadAllAsync(this, found.Value, progress, cancel).ConfigureAwait(false)
+            : found;
+    }
+
+    /// <summary>
     /// Loads every asset of a type that Magic or a gem reads, so the cache holds what each caching importer and
     /// preprocessor makes.
     /// </summary>
@@ -673,50 +681,14 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, with no sidecar, or tells why
-    /// it could not.
+    /// Where the part built as <paramref name="assembly"/> keeps its own assets.
     /// </summary>
     /// <remarks>
-    /// With no sidecar, the file is not an asset. The <see cref="IAssetExporter{T}"/> that a gem gives for the type
-    /// writes it, or Core writes it for a type marked <see cref="AssetFormatAttribute"/>. The path ends in the
-    /// exporter's extension. A value that holds the default of its type is left out, unless
-    /// <paramref name="includesDefaults"/> asks for every value. Any thread.
+    /// Every build but a release records the folder: its source <c>Resources/</c>. Else it is <c>Resources/</c> in
+    /// <paramref name="folder"/>, the folder of the assembly, where a release copies them.
     /// </remarks>
-    public async Task<Result> ExportAsync<T>(
-        T asset,
-        string file,
-        bool includesDefaults,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where T : IAsset<T>
-    {
-        ArgumentNullException.ThrowIfNull(asset);
-        ArgumentNullException.ThrowIfNull(file);
-
-        Result<ReadOnlyMemory<byte>> bytes;
-        if (Loaded.Exporters.GetValueOrDefault(typeof(T)) is IAssetExporter<T> exporter)
-        {
-            if (!file.EndsWith(exporter.Extension, StringComparison.OrdinalIgnoreCase))
-                return Result.Failure($"a {typeof(T).Name}'s file ends in {exporter.Extension}, not {file}.");
-
-            bytes = await exporter.ExportAsync(asset, includesDefaults, progress, cancel).ConfigureAwait(false);
-        }
-        else if (typeof(T).GetCustomAttribute<AssetFormatAttribute>() is { } format)
-        {
-            bytes = await Task.Run(() => WriteCoreFormat(asset, format.Format, includesDefaults), cancel)
-                .ConfigureAwait(false);
-        }
-        else
-        {
-            return Result.Failure($"no gem the project lists writes {typeof(T).Name}s.");
-        }
-
-        if (!bytes.Ok)
-            return Result.Failure(bytes.Error);
-
-        return await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
-    }
+    internal static string GetResources(IFileSystem files, Assembly assembly, string folder) =>
+        assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
 
     /// <summary>
     /// Loads asset <paramref name="id"/> as the type its <c>.meta</c> names, and writes it to <paramref name="file"/>
@@ -1286,6 +1258,37 @@ public sealed class AssetManager : IDisposable
 
             return read;
         }
+    }
+
+    /// <summary>
+    /// Stops the watching.
+    /// </summary>
+    /// <remarks>
+    /// Only the host calls it, at the end of the run, on its thread. The loads in progress stopped with the run's
+    /// <see cref="App.Lifetime"/>, and a load that lands after it is dropped. A load that is still awaited ends
+    /// cancelled, and so does a load asked for after it.
+    /// </remarks>
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        _watches.Dispose();
+        List<TaskCompletionSource<Made>> waiting;
+        lock (_gate)
+        {
+            waiting = [.. Loaded.Entries.Values.SelectMany(entry => entry.Waiting)];
+        }
+
+        foreach (TaskCompletionSource<Made> waiter in waiting)
+        {
+            waiter.TrySetCanceled(_app.Lifetime);
+        }
+
+        // A write that the run leaves half done is a temporary file that the next run ignores; a short wait keeps the
+        // entries that are nearly written.
+        WaitForWrites();
+        base.Dispose(disposing);
     }
 
     private static void RecordPhase(long start, string type, string phase) =>

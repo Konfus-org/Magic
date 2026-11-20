@@ -37,7 +37,7 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// <summary>
     /// The most rows the table and the material table hold.
     /// </summary>
-    public const int MaxCapacity = 1 << 18;
+    internal const int MaxCapacity = 1 << 18;
 
     /// <summary>
     /// How many rows are marked changed and uploaded together.
@@ -112,18 +112,18 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// <summary>
     /// How many rows the cull walks: the renderers of the last fill, up to <see cref="MaxCapacity"/>.
     /// </summary>
-    public int Count { get; private set; }
+    internal int Count { get; private set; }
 
     /// <summary>
     /// How many rows the table holds now: as many as the world's renderers fill, rounded up to a power of two.
     /// </summary>
-    public int Capacity => _rows.Length;
+    internal int Capacity => _rows.Length;
 
     /// <summary>
     /// The frame's instances: the rows, how many rows the material table holds and has room for, and how many times the
     /// rows have changed.
     /// </summary>
-    public GpuInstances Instances =>
+    internal GpuInstances Instances =>
         new(_rows.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version);
 
     /// <summary>
@@ -133,7 +133,7 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// <remarks>
     /// The rows after them move down, as each frame's material rows name them again.
     /// </remarks>
-    public void Forget(ulong id)
+    internal void Forget(ulong id)
     {
         if (!_failureRowOf.Keys.Any(failure => failure.Asset == id))
             return;
@@ -158,7 +158,7 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// Each row holds its model's place in the pools and the material rows of its slots, or is empty while its model is
     /// being made.
     /// </remarks>
-    public void Fill(EcsSnapshot<Transform, Ecs.Components.Renderer> renderers, uint frameIndex)
+    internal void Fill(EcsSnapshot<Transform, Ecs.Components.Renderer> renderers, uint frameIndex)
     {
         // The same snapshot again, with the same models, makes the same rows.
         bool isRebuild = resources.SettledModels != _settledModels;
@@ -209,7 +209,7 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// The blocks of rows that changed go into the table, each run of them in one copy. The material rows are made
     /// again from what the GPU resources have now and copied into theirs, and the failure rows are copied into theirs.
     /// </remarks>
-    public Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> Upload(RenderGraph graph)
+    internal Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> Upload(RenderGraph graph)
     {
         // A table asked for bigger than last frame keeps what it held.
         Result<GpuBuffer> rows = gpu.GetBuffer(new("Instance table", (long)_rows.Length * GpuInstance.Bytes));

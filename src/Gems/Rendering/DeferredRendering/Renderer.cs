@@ -87,23 +87,23 @@ public readonly record struct ShadingInput(
 /// </para>
 /// </remarks>
 public sealed class Renderer
-    : IRender,
+    : Disposable,
+        IRender,
         IRenderInto<(GpuWorld, GpuInstances, RenderViews)>,
         IRender<ViewInput, GpuView>,
         IRender<ShadingInput, FinalImage>,
-        IHookIntoDomainLoading,
-        IDisposable
+        IHookIntoDomainLoading
 {
     /// <summary>
     /// The height, as the sine of the angle, down to which a sun under the horizon still lights the world's sky: 8
     /// degrees under it, where its twilight is about as bright as a full moon.
     /// </summary>
-    public const float TwilightEnd = -0.139f;
+    internal const float TwilightEnd = -0.139f;
 
     /// <summary>
     /// The light of a world with no directional light: white, of 1 lux, from above.
     /// </summary>
-    public static readonly (Vector3 Direction, Vector3 Illuminance) NoSun = (
+    internal static readonly (Vector3 Direction, Vector3 Illuminance) NoSun = (
         Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)),
         Vector3.One
     );
@@ -249,6 +249,7 @@ public sealed class Renderer
         IFileSystem files
     )
     {
+        Track(EndPreparing);
         _settings = settings;
         _state = state;
         _ecs = ecs;
@@ -281,75 +282,10 @@ public sealed class Renderer
         _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
         _openSky = SkyTables.GetOpenSky(assets);
         _skyType = _openSky;
-    }
 
-    /// <summary>
-    /// Gets the directional light that the frame is lit by, from the lights at the same index of
-    /// <paramref name="transforms"/> and <paramref name="lights"/>.
-    /// </summary>
-    /// <remarks>
-    /// The sun while it is up or its twilight lights the sky, else the moon while it is up, else the first there is.
-    /// With no light, null: the frame is lit by <see cref="NoSun"/>.
-    /// </remarks>
-    /// <returns>
-    /// The unit direction towards the light, its colour times its intensity, in lux, above the air, and its mode.
-    /// </returns>
-    public static (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? GetSun(
-        ReadOnlySpan<Transform> transforms,
-        ReadOnlySpan<DirectionalLight> lights
-    )
-    {
-        (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun = null;
-        int sunRank = -1;
-        for (int i = 0; i < lights.Length; i++)
-        {
-            DirectionalLight light = lights[i];
-            Vector3 towards = GetDirection(transforms[i].Rotation);
-            int rank = 0;
-            if (towards.Y > TwilightEnd && light.Mode == DirectionalLightMode.Sun)
-                rank = 2;
-            else if (towards.Y > 0 && light.Mode == DirectionalLightMode.Moon)
-                rank = 1;
-
-            if (rank <= sunRank)
-                continue;
-
-            sun = (towards, GetIlluminance(light), light.Mode);
-            sunRank = rank;
-        }
-
-        return sun;
-    }
-
-    /// <summary>
-    /// The unit direction towards a directional light that <paramref name="rotation"/> turns: it shines along its own
-    /// +Z.
-    /// </summary>
-    public static Vector3 GetDirection(Quaternion rotation) =>
-        -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, rotation));
-
-    /// <summary>
-    /// The open sky's radiance that the frame carries for <paramref name="skyBrightness"/>: the brightness with the
-    /// sky's own tint, which takes a little red and less green than blue.
-    /// </summary>
-    /// <remarks>
-    /// The shaders read it as <c>lights.skyRadiance</c>. It is here, and not in a shader, so that a command can print
-    /// the same numbers that the frame carries.
-    /// </remarks>
-    public static Vector3 GetSkyRadiance(float skyBrightness) =>
-        new(skyBrightness * 0.8f, skyBrightness * 0.9f, skyBrightness);
-
-    /// <summary>
-    /// What <paramref name="light"/> sends, in lux above the air: its colour times its intensity.
-    /// </summary>
-    public static Vector3 GetIlluminance(DirectionalLight light) =>
-        new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
-
-    public void Dispose()
-    {
-        _preprocessing.Dispose();
-        _banner.Dispose();
-        EndPreparing();
+        // Disposed in the order the renderer let go before: the models' registration, the banner, then the preparing.
+        Track(_banner);
+        Track(_preprocessing);
     }
 
     /// <summary>
@@ -1075,6 +1011,68 @@ public sealed class Renderer
             _resources.Get(material);
         }
     }
+
+    /// <summary>
+    /// Gets the directional light that the frame is lit by, from the lights at the same index of
+    /// <paramref name="transforms"/> and <paramref name="lights"/>.
+    /// </summary>
+    /// <remarks>
+    /// The sun while it is up or its twilight lights the sky, else the moon while it is up, else the first there is.
+    /// With no light, null: the frame is lit by <see cref="NoSun"/>.
+    /// </remarks>
+    /// <returns>
+    /// The unit direction towards the light, its colour times its intensity, in lux, above the air, and its mode.
+    /// </returns>
+    internal static (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? GetSun(
+        ReadOnlySpan<Transform> transforms,
+        ReadOnlySpan<DirectionalLight> lights
+    )
+    {
+        (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun = null;
+        int sunRank = -1;
+        for (int i = 0; i < lights.Length; i++)
+        {
+            DirectionalLight light = lights[i];
+            Vector3 towards = GetDirection(transforms[i].Rotation);
+            int rank = 0;
+            if (towards.Y > TwilightEnd && light.Mode == DirectionalLightMode.Sun)
+                rank = 2;
+            else if (towards.Y > 0 && light.Mode == DirectionalLightMode.Moon)
+                rank = 1;
+
+            if (rank <= sunRank)
+                continue;
+
+            sun = (towards, GetIlluminance(light), light.Mode);
+            sunRank = rank;
+        }
+
+        return sun;
+    }
+
+    /// <summary>
+    /// The unit direction towards a directional light that <paramref name="rotation"/> turns: it shines along its own
+    /// +Z.
+    /// </summary>
+    internal static Vector3 GetDirection(Quaternion rotation) =>
+        -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, rotation));
+
+    /// <summary>
+    /// The open sky's radiance that the frame carries for <paramref name="skyBrightness"/>: the brightness with the
+    /// sky's own tint, which takes a little red and less green than blue.
+    /// </summary>
+    /// <remarks>
+    /// The shaders read it as <c>lights.skyRadiance</c>. It is here, and not in a shader, so that a command can print
+    /// the same numbers that the frame carries.
+    /// </remarks>
+    internal static Vector3 GetSkyRadiance(float skyBrightness) =>
+        new(skyBrightness * 0.8f, skyBrightness * 0.9f, skyBrightness);
+
+    /// <summary>
+    /// What <paramref name="light"/> sends, in lux above the air: its colour times its intensity.
+    /// </summary>
+    internal static Vector3 GetIlluminance(DirectionalLight light) =>
+        new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
 
     /// <summary>
     /// Copies what the frame draws out of the entities and publishes it for the world's step, and hands that step the

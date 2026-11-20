@@ -177,9 +177,9 @@ public interface IGraphicsApi
 /// </remarks>
 public readonly ref struct GpuUpload(GpuBuffer buffer, ulong offset, Span<byte> bytes)
 {
-    public GpuBuffer Buffer { get; } = buffer;
-
     public ulong Offset { get; } = offset;
+
+    public GpuBuffer Buffer { get; } = buffer;
 
     public Span<byte> Bytes { get; } = bytes;
 }

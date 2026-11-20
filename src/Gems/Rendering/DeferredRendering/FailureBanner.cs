@@ -19,7 +19,7 @@ namespace Magic.DeferredRendering;
 /// are not built. Its shader is in the gem's assembly, registered at its asset path; a file at that path replaces it.
 /// Render thread.
 /// </remarks>
-internal sealed class FailureBanner(AssetManager assets, IGraphicsApi gpu) : IDisposable
+internal sealed class FailureBanner : Disposable
 {
     /// <summary>
     /// The asset path of the banner's shader, and the name of the assembly's resource that holds it.
@@ -47,18 +47,25 @@ internal sealed class FailureBanner(AssetManager assets, IGraphicsApi gpu) : IDi
     /// </summary>
     private static readonly string[] _kinds = ["Pass", "Resource", "Shader", "Sky", "Weather", "Post effect"];
 
-    // Registered before the shaders below find it by its path.
-    private readonly Subscription _shader = assets.Register(ShaderPath, new Shader { Text = ReadShader() });
+    private readonly IGraphicsApi _gpu;
+    private readonly Subscription _shader;
+    private readonly DrawShaders _shaders;
 
-    private readonly DrawShaders _shaders = new(
-        PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerVertex", ShaderStage.Vertex),
-        PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerPixel", ShaderStage.Pixel)
-    )
+    internal FailureBanner(AssetManager assets, IGraphicsApi gpu)
     {
-        Cull = CullMode.None,
-    };
+        _gpu = gpu;
 
-    public void Dispose() => _shader.Dispose();
+        // Registered before the shaders below find it by its path.
+        _shader = assets.Register(ShaderPath, new Shader { Text = ReadShader() });
+        Track(_shader);
+        _shaders = new DrawShaders(
+            PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerVertex", ShaderStage.Vertex),
+            PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerPixel", ShaderStage.Pixel)
+        )
+        {
+            Cull = CullMode.None,
+        };
+    }
 
     /// <summary>
     /// Records the lines of <see cref="RenderFrame.Failures"/> over the window's image.
@@ -67,18 +74,18 @@ internal sealed class FailureBanner(AssetManager assets, IGraphicsApi gpu) : IDi
     /// It asks for the shaders every frame, so they are built before the first failure. While they are not built, or
     /// the banner's buffers are not made, it draws nothing and tells no failure, as no banner would show it.
     /// </remarks>
-    public void Record(RenderGraph graph, in RenderFrame frame)
+    internal void Record(RenderGraph graph, in RenderFrame frame)
     {
-        if (gpu.GetState(_shaders.Vertex, _shaders.Pixel) != GpuState.Ready)
+        if (_gpu.GetState(_shaders.Vertex, _shaders.Pixel) != GpuState.Ready)
             return;
 
         ReadOnlySpan<(RenderFailure Kind, string What)> failures = frame.Failures;
-        GpuTexture target = gpu.WindowTarget;
+        GpuTexture target = _gpu.WindowTarget;
         if (failures.IsEmpty || target.IsNone)
             return;
 
-        Result<GpuBuffer> lines = gpu.GetBuffer(new("Failure banner", (MaxLines + 1) * LineWords * sizeof(uint)));
-        Result<GpuBuffer> indices = gpu.GetBuffer(new("Failure banner indices", 3 * sizeof(uint), BufferUsages.Index));
+        Result<GpuBuffer> lines = _gpu.GetBuffer(new("Failure banner", (MaxLines + 1) * LineWords * sizeof(uint)));
+        Result<GpuBuffer> indices = _gpu.GetBuffer(new("Failure banner indices", 3 * sizeof(uint), BufferUsages.Index));
         if (!lines.Ok || !indices.Ok)
             return;
 
@@ -121,7 +128,7 @@ internal sealed class FailureBanner(AssetManager assets, IGraphicsApi gpu) : IDi
         if (!graph.Upload<uint>(indices.Value, [0, 1, 2]))
             return;
 
-        TextureDescription window = gpu.GetDescription(target);
+        TextureDescription window = _gpu.GetDescription(target);
         Rectangle drawn =
             post < 0
                 ? new Rectangle(0, 0, window.Width, Math.Min(count * LinePixels, window.Height))

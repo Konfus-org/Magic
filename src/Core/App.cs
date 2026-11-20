@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using Magic.Debugging;
 using Magic.Platform;
 using Magic.Projects;
+using Magic.Utils;
 
 namespace Magic;
 
@@ -12,17 +13,22 @@ namespace Magic;
 /// Commands change it at launch and while it runs. It lasts for the whole process, so a value that a command sets stays
 /// set across runs.
 /// </remarks>
-public sealed class App : IRunOptions, IDisposable
+public sealed class App : Disposable, IRunOptions
 {
     /// <summary>
     /// Cancelled by <see cref="Exit"/> when the process must end, which also cancels the <see cref="Lifetime"/> of
     /// each run.
     /// </summary>
-    private readonly CancellationTokenSource _exiting = new();
+    private readonly CancellationTokenSource _exiting;
 
     private CancellationTokenSource _lifetime;
 
-    internal App() => _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
+    internal App()
+    {
+        _exiting = Track(new CancellationTokenSource());
+        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
+        Track(() => _lifetime.Dispose());
+    }
 
     /// <summary>
     /// The project to run, as read from its <c>.magic</c> file, or null until a project is opened.
@@ -103,11 +109,6 @@ public sealed class App : IRunOptions, IDisposable
     public bool ShouldExitOnError { get; set; }
 
     /// <summary>
-    /// Whether the process ends once the run does.
-    /// </summary>
-    public bool IsExiting => _exiting.IsCancellationRequested;
-
-    /// <summary>
     /// A token that is cancelled when the run ends.
     /// </summary>
     /// <remarks>
@@ -115,6 +116,11 @@ public sealed class App : IRunOptions, IDisposable
     /// <c>--fail-on-error</c>. Work that belongs to the run must stop with this token.
     /// </remarks>
     public CancellationToken Lifetime => _lifetime.Token;
+
+    /// <summary>
+    /// Whether the process ends once the run does.
+    /// </summary>
+    internal bool IsExiting => _exiting.IsCancellationRequested;
 
     /// <summary>
     /// Pumps the OS events on the platform thread while the run lasts. The gem that provides it owns it.
@@ -131,12 +137,6 @@ public sealed class App : IRunOptions, IDisposable
     {
         get => Log.Verbosity;
         set => Log.Verbosity = value;
-    }
-
-    public void Dispose()
-    {
-        _lifetime.Dispose();
-        _exiting.Dispose();
     }
 
     public void Exit() => _exiting.Cancel();

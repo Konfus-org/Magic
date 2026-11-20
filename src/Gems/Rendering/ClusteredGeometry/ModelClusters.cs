@@ -20,19 +20,19 @@ internal sealed class ModelClusters
     /// <summary>
     /// How many vertices the model has of its own, every mesh's one after another: what a leaf draws.
     /// </summary>
-    public required int ModelVertexCount { get; init; }
+    internal required int ModelVertexCount { get; init; }
 
     /// <summary>
     /// The copies of the model's vertices that each level above the leaves draws, with normals of its own triangles.
     /// </summary>
-    public required ImmutableArray<GpuVertex> Vertices { get; init; }
+    internal required ImmutableArray<GpuVertex> Vertices { get; init; }
 
-    public required ImmutableArray<uint> Indices { get; init; }
+    internal required ImmutableArray<uint> Indices { get; init; }
 
     /// <summary>
     /// Every cluster of every level, each mesh's leaves first.
     /// </summary>
-    public required ImmutableArray<GpuCluster> Clusters { get; init; }
+    internal required ImmutableArray<GpuCluster> Clusters { get; init; }
 
     /// <summary>
     /// The model's octahedral impostor atlas, row by row as RGBA16F.
@@ -42,13 +42,13 @@ internal sealed class ModelClusters
     /// <see cref="ImpostorBuilder.Tile"/> texels a side. Each texel holds the octahedral normal, the depth from the
     /// view's front plane over the sphere's diameter, and the material slot plus one, 0 where the view sees nothing.
     /// </remarks>
-    public required ImmutableArray<Half> Impostor { get; init; }
+    internal required ImmutableArray<Half> Impostor { get; init; }
 
     /// <summary>
     /// The texture coordinates of the surface each texel of <see cref="Impostor"/> shows, at the same texels, as
     /// RG16F.
     /// </summary>
-    public required ImmutableArray<Half> ImpostorUv { get; init; }
+    internal required ImmutableArray<Half> ImpostorUv { get; init; }
 
     /// <summary>
     /// The texels that each view of <see cref="Impostor"/> saw something at, view by view, row by row.
@@ -57,12 +57,12 @@ internal sealed class ModelClusters
     /// A view's value holds its first column and row in the low two bytes, and one past its last column and row in the
     /// high two. It is 0 for a view that saw nothing.
     /// </remarks>
-    public required ImmutableArray<uint> ImpostorViewBounds { get; init; }
+    internal required ImmutableArray<uint> ImpostorViewBounds { get; init; }
 
     /// <summary>
     /// The box around the whole model, in its frame: the outline that an impostor's quad stays inside.
     /// </summary>
-    public required Vector3 BoundsMin { get; init; }
+    internal required Vector3 BoundsMin { get; init; }
 
-    public required Vector3 BoundsMax { get; init; }
+    internal required Vector3 BoundsMax { get; init; }
 }

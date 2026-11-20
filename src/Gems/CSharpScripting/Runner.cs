@@ -25,9 +25,7 @@ namespace Magic.CSharpScripting;
 /// made or started, or a hook throws, the error is logged and the handle is taken off the entity. A behaviour far from
 /// the player's cameras updates less often (<see cref="Pacing"/>), unless its entity is global. Game thread.
 /// </remarks>
-public sealed class Runner(World world, AssetManager assets, IServiceProvider services)
-    : IHookIntoWorldSave,
-        IDisposable
+public sealed class Runner(World world, AssetManager assets, IServiceProvider services) : Disposable, IHookIntoWorldSave
 {
     /// <summary>
     /// The state of a copy as JSON, which a save keeps and a copy from a save takes up.
@@ -50,29 +48,6 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     /// </summary>
     private readonly List<Vector3> _cameras = [];
 
-    public void Dispose()
-    {
-        foreach (((Entity entity, _), Copy copy) in _attached)
-        {
-            End(entity, copy.Script);
-        }
-
-        _attached.Clear();
-    }
-
-    public void Update(in Frame frame)
-    {
-        if (!world.IsLoading)
-            MatchSlots();
-
-        FindCameras();
-        Run(Hook.Update, frame);
-    }
-
-    public void FixedUpdate(in Frame frame) => Run(Hook.FixedUpdate, frame);
-
-    public void LateUpdate(in Frame frame) => Run(Hook.LateUpdate, frame);
-
     /// <summary>
     /// Writes the state of each copy that runs into its slot of the entity's <see cref="ScriptContainer"/>, so the save
     /// or the domain that opens again keeps it and the copy that comes from it takes it up in place of a start.
@@ -91,6 +66,34 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
             // The copy holds what the save just read out of it, so the set that the slot now has is no new values.
             copy.Values = GetValues(in container, script);
         }
+    }
+
+    internal void Update(in Frame frame)
+    {
+        if (!world.IsLoading)
+            MatchSlots();
+
+        FindCameras();
+        Run(Hook.Update, frame);
+    }
+
+    internal void FixedUpdate(in Frame frame) => Run(Hook.FixedUpdate, frame);
+
+    internal void LateUpdate(in Frame frame) => Run(Hook.LateUpdate, frame);
+
+    /// <inheritdoc/>
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        foreach (((Entity entity, _), Copy copy) in _attached)
+        {
+            End(entity, copy.Script);
+        }
+
+        _attached.Clear();
+        base.Dispose(disposing);
     }
 
     [SuppressMessage(

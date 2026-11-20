@@ -48,18 +48,18 @@ internal sealed class LightTiles(AssetManager assets, IGraphicsApi gpu)
     /// </summary>
     private int _lastTotal;
 
-    public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
+    internal ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
     /// <summary>
     /// Asks for the words of bits of each tile of <paramref name="view"/> at this size, a bit per light.
     /// </summary>
-    public Result<GpuBuffer> PrepareTiles(int view, int width, int height) =>
+    internal Result<GpuBuffer> PrepareTiles(int view, int width, int height) =>
         gpu.GetBuffer(new("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint)), view);
 
     /// <summary>
     /// Asks for the table, and writes the world's lights into it, point lights first, in the frame's upload pass.
     /// </summary>
-    public Result<LightBuffers> Prepare(
+    internal Result<LightBuffers> Prepare(
         RenderGraph graph,
         EcsSnapshot<Transform, PointLight> points,
         EcsSnapshot<Transform, SpotLight> spots,
@@ -105,7 +105,7 @@ internal sealed class LightTiles(AssetManager assets, IGraphicsApi gpu)
     /// <summary>
     /// Records the pass that finds each tile's lights from the view's depth.
     /// </summary>
-    public void Record(RenderGraph graph, in GpuView view)
+    internal void Record(RenderGraph graph, in GpuView view)
     {
         // The depth is the geometry gem's, drawn in the Geometry stage: the Light stage puts this pass after it,
         // although the view's step records it first.

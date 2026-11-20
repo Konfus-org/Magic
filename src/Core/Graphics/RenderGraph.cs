@@ -131,24 +131,6 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Takes the frame's passes, view by view and stage by stage in the order recorded, and empties the graph for the
-    /// next frame.
-    /// </summary>
-    /// <remarks>
-    /// An open transfer pass ends. A compute or draw pass that was never ended is left out.
-    /// </remarks>
-    public GpuCommands Finish()
-    {
-        OrderPasses();
-
-        // A copy, then Clear, so the builder keeps its capacity for the next frame; a drain would start it empty.
-        ImmutableArray<GpuPass> passes = _ordered.ToImmutable();
-        _ordered.Clear();
-
-        return new(passes);
-    }
-
-    /// <summary>
     /// Copies <paramref name="rows"/> into <paramref name="to"/> at <paramref name="offset"/> bytes, through the
     /// frame's upload ring.
     /// </summary>
@@ -235,17 +217,6 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Sets each byte of <paramref name="buffer"/> to 0, in a transfer pass of its own.
-    /// </summary>
-    public void Clear(GpuBuffer buffer)
-    {
-        Begin(new() { Name = "Transfers", Stage = RenderStage.Prepare });
-        AddUse(GetUse(buffer, GpuAccess.CopyDestination));
-        Add(new() { Kind = GpuCommandKind.FillBuffer, Id = buffer.Id });
-        EndPass();
-    }
-
-    /// <summary>
     /// Stretches level 0 of <paramref name="from"/> over level 0 of <paramref name="to"/> with
     /// <paramref name="filter"/>. The formats can differ.
     /// </summary>
@@ -319,6 +290,17 @@ public sealed class RenderGraph
     }
 
     /// <summary>
+    /// Sets each byte of <paramref name="buffer"/> to 0, in a transfer pass of its own.
+    /// </summary>
+    public void Clear(GpuBuffer buffer)
+    {
+        Begin(new() { Name = "Transfers", Stage = RenderStage.Prepare });
+        AddUse(GetUse(buffer, GpuAccess.CopyDestination));
+        Add(new() { Kind = GpuCommandKind.FillBuffer, Id = buffer.Id });
+        EndPass();
+    }
+
+    /// <summary>
     /// Builds an acceleration structure: a bottom-level one over its triangles, a top-level one over the first
     /// <paramref name="instanceCount"/> instances of its instance buffer.
     /// </summary>
@@ -336,6 +318,24 @@ public sealed class RenderGraph
                 X = instanceCount,
             }
         );
+    }
+
+    /// <summary>
+    /// Takes the frame's passes, view by view and stage by stage in the order recorded, and empties the graph for the
+    /// next frame.
+    /// </summary>
+    /// <remarks>
+    /// An open transfer pass ends. A compute or draw pass that was never ended is left out.
+    /// </remarks>
+    internal GpuCommands Finish()
+    {
+        OrderPasses();
+
+        // A copy, then Clear, so the builder keeps its capacity for the next frame; a drain would start it empty.
+        ImmutableArray<GpuPass> passes = _ordered.ToImmutable();
+        _ordered.Clear();
+
+        return new(passes);
     }
 
     /// <summary>

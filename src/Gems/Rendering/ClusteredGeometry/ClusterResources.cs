@@ -69,7 +69,7 @@ internal sealed class ClusterResources(
     /// <summary>
     /// Whether a model in the view's table is still being read, and its row draws nothing yet.
     /// </summary>
-    public bool IsLoading
+    internal bool IsLoading
     {
         get
         {
@@ -91,7 +91,7 @@ internal sealed class ClusterResources(
     /// up, and the pools grow where it does not fit.
     /// </remarks>
     /// <returns>The pools and tables, and every resident impostor's atlases.</returns>
-    public Result<ClusterPools> Prepare(RenderGraph graph, ReadOnlySpan<ModelPlace> models)
+    internal Result<ClusterPools> Prepare(RenderGraph graph, ReadOnlySpan<ModelPlace> models)
     {
         // A row past the view's last row in use has lost its model: its ranges given back, and the row dropped.
         for (int index = models.Length; index < _rows.Count; index++)
@@ -213,7 +213,7 @@ internal sealed class ClusterResources(
     /// A model that a row holds already is not read. The reads that an earlier call started and that no row took are
     /// dropped, so a model that changed since is read again.
     /// </remarks>
-    public void Start(ImmutableArray<Handle<Model>> models)
+    internal void Start(ImmutableArray<Handle<Model>> models)
     {
         foreach (Task<Result<ModelClusters>> untaken in _started.Values)
         {

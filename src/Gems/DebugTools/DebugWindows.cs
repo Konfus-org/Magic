@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Input;
+using Magic.Utils;
 
 namespace Magic.DebugTools;
 
@@ -15,57 +16,69 @@ namespace Magic.DebugTools;
 /// the meters only while the counter or the stats window shows, and collects them as often as
 /// <see cref="DebugToolsSettings.StatsCollectSec"/> says.
 /// </remarks>
-internal sealed class DebugWindows(
-    DebugToolsSettings settings,
-    OpenWindows open,
-    Settings allSettings,
-    IDebugUI ui,
-    IInput? input
-) : IDisposable
+internal sealed class DebugWindows : Disposable
 {
-    private readonly MetricsReader _metrics = new();
+    private readonly DebugToolsSettings _settings;
 
-    private readonly StatsWindow _stats = new(ui);
+    private readonly OpenWindows _open;
 
-    private readonly SettingsWindow _settingsWindow = new(ui, allSettings);
+    private readonly IDebugUI _ui;
+
+    private readonly IInput? _input;
+
+    private readonly MetricsReader _metrics;
+
+    private readonly StatsWindow _stats;
+
+    private readonly SettingsWindow _settingsWindow;
 
     /// <summary>
     /// When the meters were last collected, 0 before the first time.
     /// </summary>
     private long _collectedTimestamp;
 
-    public void Dispose() => _metrics.Dispose();
+    public DebugWindows(DebugToolsSettings settings, OpenWindows open, Settings allSettings, IDebugUI ui, IInput? input)
+    {
+        _settings = settings;
+        _open = open;
+        _ui = ui;
+        _input = input;
+        _metrics = new MetricsReader();
+        Track(_metrics);
+        _stats = new StatsWindow(ui);
+        _settingsWindow = new SettingsWindow(ui, allSettings);
+    }
 
     /// <summary>
     /// Turns the lines and windows on and off by their keys, collects the meters when due, and draws what shows.
     /// </summary>
     internal void Update()
     {
-        if (input is not null && input[settings.CounterKey].WasPressed)
-            open.IsCounterShown = !open.IsCounterShown;
+        if (_input is not null && _input[_settings.CounterKey].WasPressed)
+            _open.IsCounterShown = !_open.IsCounterShown;
 
-        if (input is not null && input[settings.StatsKey].WasPressed)
-            open.IsStatsOpen = !open.IsStatsOpen;
+        if (_input is not null && _input[_settings.StatsKey].WasPressed)
+            _open.IsStatsOpen = !_open.IsStatsOpen;
 
-        if (input is not null && input[settings.SettingsKey].WasPressed)
-            open.IsSettingsOpen = !open.IsSettingsOpen;
+        if (_input is not null && _input[_settings.SettingsKey].WasPressed)
+            _open.IsSettingsOpen = !_open.IsSettingsOpen;
 
         // Collect what the meters measured every so often, while anything shows.
-        bool isListening = open.IsCounterShown || open.IsStatsOpen;
+        bool isListening = _open.IsCounterShown || _open.IsStatsOpen;
         _metrics.Listen(isListening);
-        if (isListening && Stopwatch.GetElapsedTime(_collectedTimestamp).TotalSeconds >= settings.StatsCollectSec)
+        if (isListening && Stopwatch.GetElapsedTime(_collectedTimestamp).TotalSeconds >= _settings.StatsCollectSec)
         {
             _collectedTimestamp = Stopwatch.GetTimestamp();
             _stats.Refresh(_metrics.Collect());
         }
 
-        bool isStatsOpen = open.IsStatsOpen;
+        bool isStatsOpen = _open.IsStatsOpen;
         _stats.Update(ref isStatsOpen);
-        open.IsStatsOpen = isStatsOpen;
+        _open.IsStatsOpen = isStatsOpen;
 
-        bool isSettingsOpen = open.IsSettingsOpen;
+        bool isSettingsOpen = _open.IsSettingsOpen;
         _settingsWindow.Update(ref isSettingsOpen);
-        open.IsSettingsOpen = isSettingsOpen;
+        _open.IsSettingsOpen = isSettingsOpen;
     }
 
     /// <summary>
@@ -77,7 +90,7 @@ internal sealed class DebugWindows(
     /// </remarks>
     internal void ReportCounter()
     {
-        if (open.IsCounterShown)
-            ui.Text(_stats.CounterLine);
+        if (_open.IsCounterShown)
+            _ui.Text(_stats.CounterLine);
     }
 }

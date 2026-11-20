@@ -12,4 +12,4 @@ namespace Magic.Assets;
 /// importer copies them onto what it makes. For a type that Core reads itself, Core sets them.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, Inherited = false)]
-public sealed class AssetMetaAttribute : Attribute;
+internal sealed class AssetMetaAttribute : Attribute;

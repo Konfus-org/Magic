@@ -558,47 +558,47 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ShadowDenoiseConstants
 {
-    public uint TileStates;
+    internal uint TileStates;
 
-    public uint SunTiles;
+    internal uint SunTiles;
 
-    public uint SunOccluder;
+    internal uint SunOccluder;
 
-    public uint SunBlend;
+    internal uint SunBlend;
 
-    public uint SunHistory;
+    internal uint SunHistory;
 
-    public uint SunFiltered;
+    internal uint SunFiltered;
 
-    public uint Moments;
+    internal uint Moments;
 
-    public uint PreviousMoments;
+    internal uint PreviousMoments;
 
     /// <summary>
     /// The traced mask, the rays' and then the blended, the filtered mask, this frame's and last frame's, last frame's
     /// tiles of lights, and the sun's tint as traced.
     /// </summary>
-    public uint Mask;
+    internal uint Mask;
 
-    public uint FilteredMask;
+    internal uint FilteredMask;
 
-    public uint PreviousMask;
+    internal uint PreviousMask;
 
-    public uint LastLightTiles;
+    internal uint LastLightTiles;
 
-    public uint SunTint;
+    internal uint SunTint;
 
     /// <summary>
     /// 0 on the first frame at a size, when last frame's targets hold nothing to blend with.
     /// </summary>
-    public uint HasHistory;
+    internal uint HasHistory;
 
     /// <summary>
     /// The traced size.
     /// </summary>
-    public uint Width;
+    internal uint Width;
 
-    public uint Height;
+    internal uint Height;
 
-    public uint BlueNoise;
+    internal uint BlueNoise;
 }

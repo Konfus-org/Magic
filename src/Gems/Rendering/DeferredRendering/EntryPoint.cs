@@ -7,6 +7,7 @@ using Magic.Graphics;
 using Magic.Input;
 using Magic.Projects;
 using Magic.Threading;
+using Magic.Utils;
 
 namespace Magic.DeferredRendering;
 
@@ -16,7 +17,7 @@ namespace Magic.DeferredRendering;
 /// <remarks>
 /// The debug window also sets <see cref="RendererState"/> when a gem provides the debug UI.
 /// </remarks>
-public sealed class EntryPoint : IGem, IDisposable
+public sealed class EntryPoint : Disposable, IGem
 {
     private readonly RendererDebugWindow? _debugWindow;
 
@@ -38,6 +39,7 @@ public sealed class EntryPoint : IGem, IDisposable
         Settings = settings;
         State = new(ecs);
         Renderer = new(settings, State, shaders, gpu, assets, ecs, world, threads, events, files);
+        Track(Renderer);
     }
 
     /// <summary>
@@ -51,8 +53,6 @@ public sealed class EntryPoint : IGem, IDisposable
     public RendererState State { get; }
 
     public Renderer Renderer { get; }
-
-    public void Dispose() => Renderer.Dispose();
 
     public void Update(in Frame frame) => _debugWindow?.Update(Settings, State);
 

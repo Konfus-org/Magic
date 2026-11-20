@@ -15,6 +15,7 @@ public sealed class Mailbox<T>
     where T : class, new()
 {
     private readonly ConcurrentQueue<T> _returned = new();
+
     private T? _published;
 
     /// <summary>
@@ -38,17 +39,6 @@ public sealed class Mailbox<T>
         Back = Interlocked.Exchange(ref _published, Back) ?? (_returned.TryDequeue(out T? value) ? value : new T());
 
     /// <summary>
-    /// Whether a value was published since the last take, with the newest in <paramref name="value"/>, the reader's
-    /// until it is returned. The reader's thread.
-    /// </summary>
-    public bool TryTake([NotNullWhen(true)] out T? value)
-    {
-        value = Interlocked.Exchange(ref _published, null);
-
-        return value is not null;
-    }
-
-    /// <summary>
     /// The newest published value, or the one taken before when none is newer; null until one is published. The
     /// reader's thread.
     /// </summary>
@@ -67,6 +57,17 @@ public sealed class Mailbox<T>
         }
 
         return _taken;
+    }
+
+    /// <summary>
+    /// Whether a value was published since the last take, with the newest in <paramref name="value"/>, the reader's
+    /// until it is returned. The reader's thread.
+    /// </summary>
+    public bool TryTake([NotNullWhen(true)] out T? value)
+    {
+        value = Interlocked.Exchange(ref _published, null);
+
+        return value is not null;
     }
 
     /// <summary>

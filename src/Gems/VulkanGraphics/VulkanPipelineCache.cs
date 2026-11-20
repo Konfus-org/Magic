@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Files;
+using Magic.Utils;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;
@@ -22,7 +23,7 @@ namespace Magic.VulkanGraphics;
 /// Vulkan synchronizes the cache itself, so any thread builds pipelines through it. A save and the dispose take turns.
 /// </para>
 /// </remarks>
-internal sealed class VulkanPipelineCache : IDisposable
+internal sealed class VulkanPipelineCache : Disposable
 {
     /// <summary>
     /// The bytes of <c>VkPipelineCacheHeaderVersionOne</c>: its size, its version, the vendor's ID, the device's ID and
@@ -80,15 +81,6 @@ internal sealed class VulkanPipelineCache : IDisposable
 
     public VkPipelineCache Handle { get; private set; }
 
-    public void Dispose()
-    {
-        lock (_saving)
-        {
-            _device.Api.vkDestroyPipelineCache(Handle);
-            Handle = VkPipelineCache.Null;
-        }
-    }
-
     /// <summary>
     /// Records a pipeline's build of <paramref name="kind"/>, which started at <paramref name="startTimestamp"/>.
     /// </summary>
@@ -122,6 +114,21 @@ internal sealed class VulkanPipelineCache : IDisposable
                 $"Pipelines: {Interlocked.Read(ref _builtCount)} built in {builtMs:0} ms so far; {data.Length / 1024} KB kept as {_record}."
             )
         );
+    }
+
+    // Not tracked: it takes the save lock, so a save and the dispose take turns.
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        lock (_saving)
+        {
+            _device.Api.vkDestroyPipelineCache(Handle);
+            Handle = VkPipelineCache.Null;
+        }
+
+        base.Dispose(disposing);
     }
 
     /// <summary>

@@ -20,14 +20,22 @@ public static class Log
     /// Guards the sinks and the history, so a sink is given each line once, in order, and never two at a time.
     /// </summary>
     private static readonly Lock _lock = new();
+
     private static readonly List<ILogSink> _sinks = [];
 
     /// <summary>
     /// The last lines logged, which every sink added is given first.
     /// </summary>
     private static readonly Queue<Line> _history = new();
+
     private static int _errorCount;
+
     private static int _warningCount;
+
+    /// <summary>
+    /// The file that holds the log of this process, in <c>Logs/</c> beside Magic; null when the run has none.
+    /// </summary>
+    public static string? FilePath { get; internal set; }
 
     public static VerbosityLevel Verbosity
     {
@@ -50,11 +58,6 @@ public static class Log
     /// How many warnings were logged, at any verbosity.
     /// </summary>
     public static int WarningCount => Volatile.Read(ref _warningCount);
-
-    /// <summary>
-    /// The file that holds the log of this process, in <c>Logs/</c> beside Magic; null when the run has none.
-    /// </summary>
-    public static string? FilePath { get; internal set; }
 
     /// <summary>
     /// Detail that is usually noise: logged only at detailed verbosity or above, and otherwise not even queued.
@@ -127,6 +130,33 @@ public static class Log
     }
 
     /// <summary>
+    /// Sends each line logged from now on to <paramref name="sink"/>, until the subscription is disposed. The last
+    /// lines logged go first.
+    /// </summary>
+    /// <remarks>
+    /// Disposal waits until the sink has each line logged before, so the sink can close after it. Do not dispose the
+    /// subscription inside the sink's <see cref="ILogSink.Write"/>.
+    /// </remarks>
+    public static Subscription Register(ILogSink sink)
+    {
+        lock (_lock)
+        {
+            _sinks.Add(sink);
+
+            // Copy, as a sink that throws logs an error, which adds to the history.
+            foreach (Line line in _history.ToArray())
+            {
+                if (!Write(line, sink))
+                    break;
+            }
+        }
+
+        Info($"Log sink added: {GemRegistry.GetGemName(sink.GetType())}.");
+
+        return new Subscription(() => Unregister(sink));
+    }
+
+    /// <summary>
     /// Something failed that the run cannot recover from; the caller decides what happens next. Counted as an error.
     /// </summary>
     public static void Critical(
@@ -166,33 +196,6 @@ public static class Log
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Sends each line logged from now on to <paramref name="sink"/>, until the subscription is disposed. The last
-    /// lines logged go first.
-    /// </summary>
-    /// <remarks>
-    /// Disposal waits until the sink has each line logged before, so the sink can close after it. Do not dispose the
-    /// subscription inside the sink's <see cref="ILogSink.Write"/>.
-    /// </remarks>
-    public static Subscription Register(ILogSink sink)
-    {
-        lock (_lock)
-        {
-            _sinks.Add(sink);
-
-            // Copy, as a sink that throws logs an error, which adds to the history.
-            foreach (Line line in _history.ToArray())
-            {
-                if (!Write(line, sink))
-                    break;
-            }
-        }
-
-        Info($"Log sink added: {GemRegistry.GetGemName(sink.GetType())}.");
-
-        return new Subscription(() => Unregister(sink));
     }
 
     /// <summary>
@@ -268,14 +271,6 @@ public static class Log
         }
     }
 
-    public enum VerbosityLevel
-    {
-        Quiet,
-        Minimal,
-        Normal,
-        Detailed,
-    }
-
     public enum LoggingLevel
     {
         Verbose,
@@ -283,6 +278,14 @@ public static class Log
         Warn,
         Error,
         Critical,
+    }
+
+    public enum VerbosityLevel
+    {
+        Quiet,
+        Minimal,
+        Normal,
+        Detailed,
     }
 
     public readonly record struct Line(

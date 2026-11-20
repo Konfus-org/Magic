@@ -26,7 +26,7 @@ namespace Magic.Assets.Pipeline;
 /// read and a hash per file. Any thread.
 /// </para>
 /// </remarks>
-internal sealed class SourceVersions : IDisposable
+internal sealed class SourceVersions : Disposable
 {
     private const string RecordName = "SourceVersions";
 
@@ -40,15 +40,12 @@ internal sealed class SourceVersions : IDisposable
     /// <summary>
     /// Saves <see cref="_saveDelay"/> after the last <see cref="Remember"/>; each one starts it again, as a debounce.
     /// </summary>
-    [SuppressMessage(
-        "Usage",
-        "CA2213:Disposable fields should be disposed",
-        Justification = "Dispose disposes it through Dispose(WaitHandle), which waits out a save still running."
-    )]
     private readonly Timer _save;
 
     private readonly IFileSystem _files;
+
     private readonly Caches _caches;
+
     private readonly Lazy<ConcurrentDictionary<string, Entry>> _entries;
 
     // The save that the timer started last: only the timer's callback sets it, and Dispose reads it after the timer
@@ -61,27 +58,6 @@ internal sealed class SourceVersions : IDisposable
         _caches = caches;
         _entries = new(() => Load(caches));
         _save = new Timer(_ => _saving = SaveAsync(), null, Timeout.Infinite, Timeout.Infinite);
-    }
-
-    /// <summary>
-    /// Writes the records that are not yet, and waits for it, for a short time.
-    /// </summary>
-    [SuppressMessage(
-        "Usage",
-        "VSTHRD002:Avoid problematic synchronous waits",
-        Justification = "The host ends the run on its own thread, with no context to deadlock, and waits at most 5 s."
-    )]
-    public void Dispose()
-    {
-        using (ManualResetEvent stopped = new(false))
-        {
-            // Dispose(WaitHandle) returns false, and never signals, on a timer that is already disposed.
-            if (_save.Dispose(stopped))
-                _ = stopped.WaitOne();
-        }
-
-        if (_entries.IsValueCreated)
-            _ = Task.WhenAll(_saving, SaveAsync()).Wait(TimeSpan.FromSeconds(5));
     }
 
     /// <summary>
@@ -115,6 +91,32 @@ internal sealed class SourceVersions : IDisposable
 
         _entries.Value[lookup.File] = new Entry(lookup.Length, lookup.Ticks, lookup.Key, version);
         _ = _save.Change(_saveDelay, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>
+    /// Writes the records that are not yet, and waits for it, for a short time.
+    /// </summary>
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD002:Avoid problematic synchronous waits",
+        Justification = "The host ends the run on its own thread, with no context to deadlock, and waits at most 5 s."
+    )]
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        using (ManualResetEvent stopped = new(false))
+        {
+            // Dispose(WaitHandle) returns false, and never signals, on a timer that is already disposed.
+            if (_save.Dispose(stopped))
+                _ = stopped.WaitOne();
+        }
+
+        if (_entries.IsValueCreated)
+            _ = Task.WhenAll(_saving, SaveAsync()).Wait(TimeSpan.FromSeconds(5));
+
+        base.Dispose(disposing);
     }
 
     private static ulong GetKey(JsonElement settings, int importerVersion)

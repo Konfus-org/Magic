@@ -27,7 +27,7 @@ namespace Magic.SdlPlatform;
 /// pause.
 /// </para>
 /// </remarks>
-public sealed class Input : IInput, IDisposable
+public sealed class Input : Disposable, IInput
 {
     /// <summary>
     /// Each stick and trigger: the control it sets, SDL's axis it is read from, and the sign the value takes. SDL's
@@ -69,6 +69,7 @@ public sealed class Input : IInput, IDisposable
         _settings = settings;
         _app = app;
         _world = world;
+        Track(CloseGamepads);
         if (sdl.Pointer == null)
             return;
 
@@ -130,14 +131,6 @@ public sealed class Input : IInput, IDisposable
             int index = device.Kind == control.DeviceKind ? FindIndex(device.Kind, device.Id) : -1;
 
             return index < 0 ? default : _controls[index][control.Index];
-        }
-    }
-
-    public unsafe void Dispose()
-    {
-        foreach (nint gamepad in _gamepads.Values)
-        {
-            SDL_CloseGamepad((SDL_Gamepad*)gamepad);
         }
     }
 
@@ -421,5 +414,13 @@ public sealed class Input : IInput, IDisposable
         Log.Info($"Gamepad disconnected: {CString.Read(SDL_GetGamepadName((SDL_Gamepad*)gamepad))}");
         SDL_CloseGamepad((SDL_Gamepad*)gamepad);
         RemoveDevice(DeviceKind.Gamepad, id);
+    }
+
+    private unsafe void CloseGamepads()
+    {
+        foreach (nint gamepad in _gamepads.Values)
+        {
+            SDL_CloseGamepad((SDL_Gamepad*)gamepad);
+        }
     }
 }

@@ -27,7 +27,7 @@ namespace Magic.Projects;
 /// others go on without it; one that throws in an update hook is logged and leaves those hooks, one that throws in
 /// <c>Render</c> is a failure of the frame and is run again after a pause, and the frame goes on.
 /// </summary>
-internal sealed class Gems : IDisposable
+internal sealed class Gems : Disposable
 {
     /// <summary>
     /// How long a fixed step is.
@@ -310,23 +310,6 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// Stops the render thread, then ends the gems on this one, which is the render thread from then on, last made first,
-    /// so no gem outlives one it was made after.
-    /// </summary>
-    public void Dispose()
-    {
-        _threads.Stop(EngineThread.Render);
-        _drawn.Dispose();
-        for (int i = _loaded.Count - 1; i >= 0; i--)
-        {
-            Log.Info($"Unloading {_loaded[i].Name}.");
-            _loaded[i].Ends.Dispose();
-        }
-
-        _loaded.Clear();
-    }
-
-    /// <summary>
     /// One frame: works out the clocks, runs every gem's hooks but
     /// Render in order with the fixed steps the simulation owes, and tells the world the frame is published. Then it waits
     /// until the render thread has drawn the frame before, so the next frame is worked out while this one draws, and the
@@ -387,6 +370,27 @@ internal sealed class Gems : IDisposable
         }
 
         _frameStart = Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>
+    /// Stops the render thread, then ends the gems on this one, which is the render thread from then on, last made first,
+    /// so no gem outlives one it was made after.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (IsDisposed)
+            return;
+
+        _threads.Stop(EngineThread.Render);
+        _drawn.Dispose();
+        for (int i = _loaded.Count - 1; i >= 0; i--)
+        {
+            Log.Info($"Unloading {_loaded[i].Name}.");
+            _loaded[i].Ends.Dispose();
+        }
+
+        _loaded.Clear();
+        base.Dispose(disposing);
     }
 
     /// <summary>

@@ -90,7 +90,7 @@ public record struct FrameConstants
 /// <c>Scene/Models.slang</c>, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-public record struct GpuModels
+internal record struct GpuModels
 {
     public const int Offset = FrameConstants.Bytes;
 
@@ -119,7 +119,7 @@ public record struct GpuModels
 /// <see cref="GpuModels"/> by what builds the structure, and all 0 where nothing does.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-public record struct GpuTracedWorld
+internal record struct GpuTracedWorld
 {
     public const int Offset = GpuModels.Offset + GpuModels.Bytes;
 
@@ -138,7 +138,7 @@ public record struct GpuTracedWorld
 /// <see cref="GpuTracedWorld"/>.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-public record struct GpuLights
+internal record struct GpuLights
 {
     public const int Offset = GpuTracedWorld.Offset + GpuTracedWorld.Bytes;
 

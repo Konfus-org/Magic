@@ -32,8 +32,6 @@ public readonly ref struct ComputePass
         return this;
     }
 
-    public ComputePass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
-
     public void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1)
     {
         _graph.Add(
@@ -65,6 +63,8 @@ public readonly ref struct ComputePass
         );
         _graph.EndPass();
     }
+
+    public ComputePass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
 
     /// <summary>
     /// Dispatches three unsigned group counts read from <paramref name="arguments"/> at <paramref name="offset"/>.

@@ -33,10 +33,10 @@ public readonly record struct ClusteredGeometryInput(GpuView? View, ClusterPools
 /// their resolve passes are built.
 /// </remarks>
 public sealed class Renderer
-    : IRender<ClusterPoolsInput, ClusterPools>,
+    : Disposable,
+        IRender<ClusterPoolsInput, ClusterPools>,
         IRenderFrom<ClusteredGeometryInput>,
-        IHookIntoDomainLoading,
-        IDisposable
+        IHookIntoDomainLoading
 {
     /// <summary>
     /// When a model draws as its impostor. The game thread writes it, and the step of a view reads it.
@@ -63,16 +63,12 @@ public sealed class Renderer
         _settings = settings;
         _threads = threads;
         _gpu = gpu;
+        Track(EndLoading);
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
+        Track(_preprocessing);
         _resources = new ClusterResources(clusters, assets, threads, gpu);
         _passes = new ClusterPasses(assets, gpu);
-    }
-
-    public void Dispose()
-    {
-        _preprocessing.Dispose();
-        EndLoading();
     }
 
     /// <summary>

@@ -137,6 +137,11 @@ public static class GpuPacker
     }
 
     /// <summary>
+    /// Encodes a number in [-1, 1] as a signed 16-bit fraction in the low half of a word.
+    /// </summary>
+    public static uint EncodeSnorm16(float value) => (ushort)(short)MathF.Round(Math.Clamp(value, -1, 1) * 32767);
+
+    /// <summary>
     /// Encodes two numbers in [0, 1] as unsigned 16-bit fractions, x in the low half of a word and y in the high half.
     /// </summary>
     public static uint EncodeUnorm2x16(Vector2 value)
@@ -146,11 +151,6 @@ public static class GpuPacker
 
         return x | (y << 16);
     }
-
-    /// <summary>
-    /// Encodes a number in [-1, 1] as a signed 16-bit fraction in the low half of a word.
-    /// </summary>
-    public static uint EncodeSnorm16(float value) => (ushort)(short)MathF.Round(Math.Clamp(value, -1, 1) * 32767);
 
     /// <summary>
     /// Writes a texture's heap id into the field <paramref name="name"/> of <paramref name="words"/>, and its sampler's

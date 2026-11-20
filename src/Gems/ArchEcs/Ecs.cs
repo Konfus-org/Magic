@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
 using Magic.Threading;
+using Magic.Utils;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
 using Entity = Magic.Ecs.Entity;
@@ -20,7 +21,7 @@ namespace Magic.ArchEcs;
 /// allocates nothing. Arch trusts its caller. Thus this part throws for what Arch would let go wrong silently: a dead
 /// entity, a structural change during a loop, or a call from another thread.
 /// </remarks>
-public sealed class Ecs : IEcs, IDisposable
+public sealed class Ecs : Disposable, IEcs
 {
     private readonly ArchWorld _world;
 
@@ -65,9 +66,8 @@ public sealed class Ecs : IEcs, IDisposable
 
         _threads = threads;
         _world = ArchWorld.Create();
+        Track(_world);
     }
-
-    public void Dispose() => _world.Dispose();
 
     public Entity Create(ReadOnlySpan<IComponent> components)
     {
