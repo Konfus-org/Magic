@@ -183,60 +183,6 @@ public sealed class DebugUI : Disposable, IDebugUI
 
     public bool IsEnabled => true;
 
-    /// <summary>
-    /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
-    /// </summary>
-    internal unsafe void BeginFrame(in Frame frame)
-    {
-        _text.Reset();
-        ImGuiIO_t* io = ImGui_GetIO();
-        if (_input is { } input)
-            ImGuiInput.Feed(io, input, _text);
-
-        // The look at the UI's scale and font size, made again from scale 1 only when either changed. ImGui scales the font
-        // by FontScaleMain itself, and its spacing only by ScaleAllSizes.
-        ImGuiStyle_t* style = ImGui_GetStyle();
-        float scale = _settings.UiScale > 0 ? _settings.UiScale : (_app.Window?.DisplayScale ?? 1);
-        if (style->FontScaleMain != scale || style->FontSizeBase != _settings.FontSize)
-        {
-            *style = _look;
-            ImGuiStyle_ScaleAllSizes(style, scale);
-            style->FontSizeBase = _settings.FontSize;
-            style->FontScaleMain = scale;
-        }
-
-        // ImGui needs a time step of more than 0, which a frame's may not be.
-        io->DisplaySize = GetDisplaySize().Im;
-        io->DeltaTime = Math.Max((float)frame.AppDeltaSec, 1e-4f);
-        ImGui_NewFrame();
-        _isWindowDrawn = false;
-    }
-
-    /// <summary>
-    /// Draws the reports under the frame's windows, then ends ImGui's frame.
-    /// </summary>
-    /// <remarks>
-    /// Call it every frame: ImGui must end a frame before the next begins, even when nothing draws it.
-    /// </remarks>
-    internal void EndFrame(in Frame frame)
-    {
-        if (_depth > 0)
-            Text("A debug UI window was begun and not ended; it is ended for it.", Reports.Error);
-
-        while (_depth > 0)
-        {
-            End();
-        }
-
-        // What gems ask to show always shows; the lines logged to show on screen only while a debug window is drawn, or
-        // always when the settings say so. Everything is taken either way, so what has had its time goes.
-        _worldTexts.Clear();
-        _screenLines.Clear();
-        _reports.Take(frame.AppSec, _settings.IsLogAlwaysShown || _isWindowDrawn, _worldTexts, _screenLines);
-        DrawReports();
-        ImGui_Render();
-    }
-
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? Reports.White, position, tooltip, 0));
 
@@ -566,6 +512,60 @@ public sealed class DebugUI : Disposable, IDebugUI
         ImGui_EndPopup();
 
         return isClicked;
+    }
+
+    /// <summary>
+    /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
+    /// </summary>
+    internal unsafe void BeginFrame(in Frame frame)
+    {
+        _text.Reset();
+        ImGuiIO_t* io = ImGui_GetIO();
+        if (_input is { } input)
+            ImGuiInput.Feed(io, input, _text);
+
+        // The look at the UI's scale and font size, made again from scale 1 only when either changed. ImGui scales the font
+        // by FontScaleMain itself, and its spacing only by ScaleAllSizes.
+        ImGuiStyle_t* style = ImGui_GetStyle();
+        float scale = _settings.UiScale > 0 ? _settings.UiScale : (_app.Window?.DisplayScale ?? 1);
+        if (style->FontScaleMain != scale || style->FontSizeBase != _settings.FontSize)
+        {
+            *style = _look;
+            ImGuiStyle_ScaleAllSizes(style, scale);
+            style->FontSizeBase = _settings.FontSize;
+            style->FontScaleMain = scale;
+        }
+
+        // ImGui needs a time step of more than 0, which a frame's may not be.
+        io->DisplaySize = GetDisplaySize().Im;
+        io->DeltaTime = Math.Max((float)frame.AppDeltaSec, 1e-4f);
+        ImGui_NewFrame();
+        _isWindowDrawn = false;
+    }
+
+    /// <summary>
+    /// Draws the reports under the frame's windows, then ends ImGui's frame.
+    /// </summary>
+    /// <remarks>
+    /// Call it every frame: ImGui must end a frame before the next begins, even when nothing draws it.
+    /// </remarks>
+    internal void EndFrame(in Frame frame)
+    {
+        if (_depth > 0)
+            Text("A debug UI window was begun and not ended; it is ended for it.", Reports.Error);
+
+        while (_depth > 0)
+        {
+            End();
+        }
+
+        // What gems ask to show always shows; the lines logged to show on screen only while a debug window is drawn, or
+        // always when the settings say so. Everything is taken either way, so what has had its time goes.
+        _worldTexts.Clear();
+        _screenLines.Clear();
+        _reports.Take(frame.AppSec, _settings.IsLogAlwaysShown || _isWindowDrawn, _worldTexts, _screenLines);
+        DrawReports();
+        ImGui_Render();
     }
 
     /// <summary>

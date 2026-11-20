@@ -724,7 +724,8 @@ Success = !Log.HasLoggedErrors;
        marshalling is off, and its char as byte, a FILE only ever pointed at, every call in C's own convention, the one
        a 64-bit platform has, an unnamed enum's members as int, as Windows makes them, so a constant converts alike on
        every platform, function bodies read for their declarations alone, as none is bound, and a header that marks
-       the file generated. The generator's own attributes come with the project's first library alone, as one
+       the file generated, and no assembly-wide GeneratedCode attribute, which would mark the whole project generated and
+       silence the house rules in it. The generator's own attributes come with the project's first library alone, as one
        declaration of them serves the project, and with them the assembly's runtime marshalling turned off. One
        library at a time, so each is written with its own headers. -->
   <Target
@@ -758,7 +759,7 @@ Success = !Log.HasLoggedErrors;
       File="%(_NativeGenerated.Response)"
       Overwrite="true"
       WriteOnlyWhenDifferent="true"
-      Lines="--language=%(_NativeGenerated.Language);--file=%(_NativeGenerated.RootHeader);@(_BindingsTraversed->'--traverse=%(FullPath)');@(_NativeInclude->'--include-directory=%(Checkout)%(IncludePath)');--include-directory=%(_NativeGenerated.ShimFolder);@(_BindingsDefine->'--define-macro=%(Identity)');@(_BindingsUnbound->'--exclude=%(Identity)');--namespace=%(_NativeGenerated.Namespace);--library-path=%(_NativeGenerated.Identity);--method-class-name=$([MSBuild]::ValueOrDefault('%(_NativeGenerated.Class)', '%(_NativeGenerated.Identity)'));--output=%(_NativeGenerated.Generated);--header-file=$(IntermediateOutputPath)bindings.header;--config=codegen=latest;--generate=macro-bindings;--generate=funcs-with-body=false;--generate=disable-runtime-marshalling;--generate=helper-types=$(_BindingsHelpers);--remap=_Bool=bool;--remap=char=byte;--remap=FILE=void;--with-callconv=*=Cdecl;--with-type=__AnonymousEnum_*=int;--no-resource-directory-detection;--additional=-Wno-implicit-function-declaration;@(_BindingsSystemArgument)"
+      Lines="--language=%(_NativeGenerated.Language);--file=%(_NativeGenerated.RootHeader);@(_BindingsTraversed->'--traverse=%(FullPath)');@(_NativeInclude->'--include-directory=%(Checkout)%(IncludePath)');--include-directory=%(_NativeGenerated.ShimFolder);@(_BindingsDefine->'--define-macro=%(Identity)');@(_BindingsUnbound->'--exclude=%(Identity)');--namespace=%(_NativeGenerated.Namespace);--library-path=%(_NativeGenerated.Identity);--method-class-name=$([MSBuild]::ValueOrDefault('%(_NativeGenerated.Class)', '%(_NativeGenerated.Identity)'));--output=%(_NativeGenerated.Generated);--header-file=$(IntermediateOutputPath)bindings.header;--config=codegen=latest;--generate=macro-bindings;--generate=funcs-with-body=false;--generate=disable-runtime-marshalling;--generate=generated-code=none;--generate=helper-types=$(_BindingsHelpers);--remap=_Bool=bool;--remap=char=byte;--remap=FILE=void;--with-callconv=*=Cdecl;--with-type=__AnonymousEnum_*=int;--no-resource-directory-detection;--additional=-Wno-implicit-function-declaration;@(_BindingsSystemArgument)"
     />
   </Target>
 

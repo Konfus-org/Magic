@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
@@ -27,6 +28,11 @@ internal readonly record struct DenoiserTextures(
 /// <remarks>
 /// One for each view: its NRD instance and last frame's matrices are the view's own.
 /// </remarks>
+[SuppressMessage(
+    "Style",
+    "IDE0072:Add missing cases",
+    Justification = "NRD names far more formats and resources than the diffuse light uses; the rest fail on purpose."
+)]
 internal sealed unsafe class Denoiser : Disposable
 {
     private const uint Identifier = 0;

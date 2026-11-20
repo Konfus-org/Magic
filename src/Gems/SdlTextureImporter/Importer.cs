@@ -28,12 +28,12 @@ namespace Magic.SdlTextureImporter;
 /// </remarks>
 public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
 {
-    private const int HeaderBytes = 16;
-
     /// <summary>
     /// The bytes of one RGBA8 texel.
     /// </summary>
     internal const int TexelBytes = 4;
+
+    private const int HeaderBytes = 16;
 
     private const int BlockTexels = 4;
     private const int BlockBytes = 16;

@@ -38,7 +38,7 @@ internal sealed class ClusterPasses
     private const BufferUsages IndirectUsage = BufferUsages.Storage | BufferUsages.Indirect;
 
     // A name for each level of the depth pyramid, as many as a texture can have: GPU timings are kept by name.
-    private static readonly ImmutableArray<string> DepthPyramidPasses =
+    private static readonly ImmutableArray<string> _depthPyramidPasses =
     [
         .. Enumerable.Range(0, 32).Select(level => $"Build depth pyramid {level}"),
     ];
@@ -452,7 +452,7 @@ internal sealed class ClusterPasses
             {
                 ComputePass build = graph
                     .Compute(
-                        DepthPyramidPasses[level],
+                        _depthPyramidPasses[level],
                         _depthPyramidShader,
                         new GpuConstants(gpu.Frame.Id, (uint)level, picture.Id),
                         RenderStages.Geometry
