@@ -69,7 +69,7 @@ codes. The code of the commands is in [`Commands/`](src/Core/CommandLine/Command
 A sample is a project that shows what Magic does. Each sample has a folder in `samples/`, with its `.magic` file and
 a csproj with its own code. `tools/Scripts/Validate.ps1` runs each sample.
 
-- To open a sample without a window, run `dotnet run --project samples/<Name>`. This command builds Magic first. To
+- To open a sample headless, run `dotnet run --project samples/<Name>`. This command builds Magic first. To
   end the run, type `exit`.
 - To open a sample with a window, do the steps of [Build and run](#build-and-run) with
   `samples/<Name>/<Name>.magic`.
