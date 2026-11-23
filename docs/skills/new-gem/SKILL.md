@@ -11,7 +11,9 @@ description: Adds a gem to Magic, from the template to a sample that runs it. Us
    - A new gem is a decision. Get the user's yes ([PROJECT.md](../PROJECT.md#decisions)).
    - Name the gem for its role.
 2. **Make the gem from the template.** From the repository root, run `Magic new gem <Name> -o src/Gems/<Name>`
-   ([Templates](../../TOOLS.md#templates)). Only its csproj gives its `Description`, `Version` and `Authors`.
+   ([Templates](../../TOOLS.md#templates)). Only its csproj gives its `Description`, `Version` and `Authors`. For a
+   gem that calls a C library, add `--native` and its options
+   ([A gem that calls a C library](../../TOOLS.md#a-gem-that-calls-a-c-library)).
 3. **Write the gem** as [Gems, hooks and services](../../CODE_STANDARDS.md#gems-hooks-and-services) says:
    - A `public sealed class EntryPoint : IGem`, with only the hooks that it needs.
    - A constructor that gets what the gem needs and makes its parts.

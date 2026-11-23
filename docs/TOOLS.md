@@ -222,6 +222,19 @@ The template makes `src/Gems/Foo/Foo.csproj` and `EntryPoint.cs`. It also makes 
 `FooSettings.cs`, and a part that logs that the gem runs. It adds the project to the `Gems` folder of the solution. The
 csproj of the gem states its `Description`, `Version` and `Authors`.
 
+#### A gem that calls a C library
+
+Add `--native <library>` to make a gem that builds and binds a C library ([Native libraries](GEMS.md#native-libraries)).
+The template then writes the `NativeLibrary` item in the csproj and allows unsafe code. Other options give the
+repository, the tag, the headers and the CMake arguments of the library. `dotnet new magic-gem --help` gives each
+option and its default. For example:
+
+```powershell
+Magic new gem Foo -o src/Gems/Foo --native foo --repository https://github.com/example/foo --gitTag v1.0
+```
+
+For other metadata of the item, such as `Url`, `Unbound` or `Language`, edit the csproj.
+
 `Magic new <template> <name>` runs `dotnet new magic-<template>`. It passes on each option that Magic does not know,
 such as `-o`.
 

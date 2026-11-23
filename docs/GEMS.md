@@ -54,7 +54,8 @@ state of the run, which is not saved. A value that the user keeps is a setting.
 A gem can call a C library. Declare the library as a `NativeLibrary` item in the csproj of the gem. The build gets the
 library, builds it with CMake and generates its C# API with
 [ClangSharpPInvokeGenerator](https://github.com/dotnet/ClangSharp). `Directory.Build.targets` documents the metadata of
-the item.
+the item. To make a new gem with the item, use the `--native` option of the gem template
+([A gem that calls a C library](TOOLS.md#a-gem-that-calls-a-c-library)).
 
 - All the checkouts on a machine share the built libraries, in `Magic/NativeLibs/` under the local application data
   folder. Set `MagicNativeLibs` to move them. Set `MagicNativeCores` to limit the cores that their build uses.

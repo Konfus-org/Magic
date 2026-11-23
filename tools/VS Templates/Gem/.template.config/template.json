@@ -20,6 +20,66 @@
       "replaces": "GemAuthors",
       "description": "Who made the gem, shown beside it as Magic starts it."
     },
+    "native": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "",
+      "replaces": "NativeName",
+      "description": "A C library that the gem builds and binds: the name of its shared library and of the class of its C# API. Empty for no C library."
+    },
+    "repository": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "",
+      "replaces": "NativeRepository",
+      "description": "The git repository of the C library."
+    },
+    "gitTag": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "",
+      "replaces": "NativeTag",
+      "description": "The tag of the C library to build."
+    },
+    "headers": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "",
+      "description": "The headers of the C library to bind, paths in its repository. Empty for include/<native>.h."
+    },
+    "includePath": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "include",
+      "replaces": "NativeIncludePath",
+      "description": "The folder in the repository of the C library whose declarations are bound."
+    },
+    "cmakeOptions": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "-DBUILD_SHARED_LIBS=ON",
+      "replaces": "NativeCMakeOptions",
+      "description": "The CMake arguments that build the C library as a shared library, with a semicolon between each two."
+    },
+    "hasNative": { "type": "computed", "value": "(native != \"\")" },
+    "defaultHeaders": {
+      "type": "generated",
+      "generator": "join",
+      "parameters": {
+        "symbols": [
+          { "type": "const", "value": "include/" },
+          { "type": "ref", "value": "native" },
+          { "type": "const", "value": ".h" }
+        ],
+        "separator": ""
+      }
+    },
+    "boundHeaders": {
+      "type": "generated",
+      "generator": "coalesce",
+      "replaces": "NativeHeaders",
+      "parameters": { "sourceVariableName": "headers", "fallbackVariableName": "defaultHeaders" }
+    },
     "HostIdentifier": { "type": "bind", "binding": "HostIdentifier" }
   },
   "primaryOutputs": [ { "path": "GemName.csproj" } ],
