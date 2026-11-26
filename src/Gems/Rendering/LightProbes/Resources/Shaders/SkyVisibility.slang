@@ -42,7 +42,9 @@ struct SkyVisibilityConstants
     float farDistance;
     // Metres of depth that still count as the point itself, against the depth's error.
     float depthBias;
-    float2 padding;
+    // The first z of the slab of probes that this dispatch tests.
+    uint probeFirstZ;
+    float padding;
 };
 
 // The widest angle from the mirror direction, as a cosine, of the directions that the specular visibility counts.
@@ -164,10 +166,11 @@ float4 SampleProbes(SkyVisibilityConstants constants, float3 world)
 void TestSkyProbes(uint3 thread : SV_DispatchThreadID)
 {
     SkyVisibilityConstants constants = LoadVisibilityConstants();
-    if (any(thread >= constants.probeCounts))
+    uint3 probe = thread + uint3(0u, 0u, constants.probeFirstZ);
+    if (any(probe >= constants.probeCounts))
         return;
 
-    float3 world = constants.probeOrigin + float3(thread) * constants.probeCell;
+    float3 world = constants.probeOrigin + float3(probe) * constants.probeCell;
     float3 point = world - constants.anchor;
     TextureRef atlas = { constants.farAtlas };
     SamplerRef sampler = { constants.sampler };
@@ -186,7 +189,7 @@ void TestSkyProbes(uint3 thread : SV_DispatchThreadID)
     }
 
     StorageVolumeRef probes = { constants.probes, 0u };
-    probes.Store(thread, drawn > 0.0 ? harmonics / drawn : OpenSky);
+    probes.Store(probe, drawn > 0.0 ? harmonics / drawn : OpenSky);
 }
 
 // The share of the sky each pixel sees at half size, diffuse in red and specular in green: from the near maps inside

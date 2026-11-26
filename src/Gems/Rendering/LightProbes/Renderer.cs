@@ -98,6 +98,11 @@ public sealed class Renderer
     private const float ProbeCell = 4;
 
     /// <summary>
+    /// The slabs of the probe volume along z that are tested again in turn, one a frame, while the volume stays.
+    /// </summary>
+    private const int ProbeSlabs = 8;
+
+    /// <summary>
     /// The metres from the camera inside which the near maps alone decide a pixel's visibility, and past which the
     /// probes alone do.
     /// </summary>
@@ -158,6 +163,13 @@ public sealed class Renderer
     private SkyMaps? _near;
 
     private SkyMaps? _far;
+
+    /// <summary>
+    /// The first corner of the probes that the volume holds, or none before it is first tested whole.
+    /// </summary>
+    private Vector3? _probeOrigin;
+
+    private int _probeSlab;
 
     internal Renderer(LightProbesSettings settings, AssetManager assets, IGraphicsApi gpu)
     {
@@ -413,10 +425,17 @@ public sealed class Renderer
             return null;
         }
 
+        // A volume that moved, or that is new, is tested whole. Else one slab along z a frame is tested again, so a
+        // change of the far maps reaches each probe within ProbeSlabs frames.
+        bool isWhole = _probeOrigin != origin;
+        int slabDepth = ProbesAcross / ProbeSlabs;
+        int firstZ = isWhole ? 0 : _probeSlab * slabDepth;
+        int depth = isWhole ? ProbesAcross : slabDepth;
         SkyVisibilityConstants row = CreateConstants(input.Views, sampler.Value) with
         {
             Probes = volume.Value.Id,
             ProbeOrigin = origin,
+            ProbeFirstZ = (uint)firstZ,
         };
         if (!graph.Upload(constants.Value, [row]))
             return null;
@@ -430,7 +449,9 @@ public sealed class Renderer
             )
             .Reads(input.World.Frame, constants.Value, input.Views.FarMaps, input.Depth.FarAtlas)
             .Writes(volume.Value)
-            .DispatchOver(ProbesAcross, ProbesHigh, ProbesAcross);
+            .DispatchOver(ProbesAcross, ProbesHigh, depth);
+        _probeOrigin = origin;
+        _probeSlab = isWhole ? 0 : (_probeSlab + 1) % ProbeSlabs;
 
         return new SkyProbes(volume.Value, origin, ProbeCell, (ProbesAcross, ProbesHigh, ProbesAcross));
     }
@@ -634,7 +655,7 @@ internal record struct SkyVisibilityConstants
 
     public float DepthBias;
 
-    public float Padding0;
+    public uint ProbeFirstZ;
 
-    public float Padding1;
+    public float Padding0;
 }

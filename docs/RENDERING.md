@@ -301,8 +301,8 @@ shadow maps. The settings are in `LightProbesSettings`. `Rendering.IsSkyVisibili
 - A map draws again only where a caster changes, up to `Rendering.ChangeRectsPerFrame` rectangles a frame, and when
   the camera moves out of its box, up to `Rendering.ScrollMapsPerFrame` maps a frame.
 - Near the camera, each pixel tests the near maps to find the share of the sky that its diffuse light and its
-  reflection see. Far from the camera, a volume of probes, 4 m apart, tests the far maps. The two blend between 40 m
-  and 48 m.
+  reflection see. Far from the camera, a volume of probes, 4 m apart, tests the far maps: all of it when it moves with
+  the camera, else one eighth of it each frame. The two blend between 40 m and 48 m.
 - The share of the sky dims the sky's light at each pixel, so a room or a cave that sees no sky is dark.
 - The `SkyVisibility` debug view shows the share of the sky that each pixel's diffuse light sees.
 
