@@ -46,6 +46,45 @@ internal sealed class FrameView(IGraphicsApi gpu)
     }
 
     /// <summary>
+    /// Gets the frame's main camera as the work the views share sees it, at the size of the whole picture, and its
+    /// constants as the world's buffer holds them: no jitter, no targets, and no motion since last frame.
+    /// </summary>
+    internal static (WorldEye Eye, FrameConstants Constants) CreateEye(
+        (Transform Transform, Camera Camera) camera,
+        System.Drawing.Size picture
+    )
+    {
+        int width = Math.Max(picture.Width, 1);
+        int height = Math.Max(picture.Height, 1);
+        Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 worldToView);
+        Matrix4x4 projection = CreatePerspective(camera.Camera.FieldOfView, (float)width / height, camera.Camera.Near);
+        Matrix4x4 viewProjection = worldToView * projection;
+        Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
+        float pixelsPerRadian = height / (2 * MathF.Tan(camera.Camera.FieldOfView * MathF.PI / 360));
+        Vector4 position = new(camera.Transform.Position, 0);
+        FrameConstants constants = new()
+        {
+            View = worldToView,
+            Projection = projection,
+            ViewProjection = viewProjection,
+            InverseViewProjection = inverse,
+            CameraPosition = position,
+            PreviousViewProjection = viewProjection,
+            PreviousCameraPosition = position,
+            Width = (uint)width,
+            Height = (uint)height,
+            Near = camera.Camera.Near,
+            PixelsPerRadian = pixelsPerRadian,
+        };
+        SetFrustum(ref constants);
+
+        return (
+            new WorldEye(camera.Transform.Position, viewProjection, pixelsPerRadian, camera.Camera.Near),
+            constants
+        );
+    }
+
+    /// <summary>
     /// Forgets the last frame's camera and size, so the next frame moves nothing on from where a view that is gone
     /// looked, and each gem that keeps a history of the view starts it again.
     /// </summary>
@@ -148,6 +187,8 @@ internal sealed class FrameView(IGraphicsApi gpu)
         isSent &= graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuSkyTables)], GpuSkyTables.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuLocalShadows)], GpuLocalShadows.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuAmbient)], GpuAmbient.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
 
@@ -155,43 +196,10 @@ internal sealed class FrameView(IGraphicsApi gpu)
     }
 
     /// <summary>
-    /// Gets the frame's main camera as the work the views share sees it, at the size of the whole picture, and its
-    /// constants as the world's buffer holds them: no jitter, no targets, and no motion since last frame.
+    /// Whether the last frame drew the view at this size: targets made again at another hold nothing of it.
     /// </summary>
-    internal static (WorldEye Eye, FrameConstants Constants) CreateEye(
-        (Transform Transform, Camera Camera) camera,
-        System.Drawing.Size picture
-    )
-    {
-        int width = Math.Max(picture.Width, 1);
-        int height = Math.Max(picture.Height, 1);
-        Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 worldToView);
-        Matrix4x4 projection = CreatePerspective(camera.Camera.FieldOfView, (float)width / height, camera.Camera.Near);
-        Matrix4x4 viewProjection = worldToView * projection;
-        Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
-        float pixelsPerRadian = height / (2 * MathF.Tan(camera.Camera.FieldOfView * MathF.PI / 360));
-        Vector4 position = new(camera.Transform.Position, 0);
-        FrameConstants constants = new()
-        {
-            View = worldToView,
-            Projection = projection,
-            ViewProjection = viewProjection,
-            InverseViewProjection = inverse,
-            CameraPosition = position,
-            PreviousViewProjection = viewProjection,
-            PreviousCameraPosition = position,
-            Width = (uint)width,
-            Height = (uint)height,
-            Near = camera.Camera.Near,
-            PixelsPerRadian = pixelsPerRadian,
-        };
-        SetFrustum(ref constants);
-
-        return (
-            new WorldEye(camera.Transform.Position, viewProjection, pixelsPerRadian, camera.Camera.Near),
-            constants
-        );
-    }
+    internal bool HasHistory(int width, int height) =>
+        _previous is { } last && last.Width == width && last.Height == height;
 
     /// <summary>
     /// Sets the frustum's planes from the constants' view-projection, for row vectors: each a column added to or taken
@@ -212,12 +220,6 @@ internal sealed class FrameView(IGraphicsApi gpu)
         constants.FrustumPlane4 = Normalize(c3 - c2);
         constants.FrustumPlane5 = Normalize(c2);
     }
-
-    /// <summary>
-    /// Whether the last frame drew the view at this size: targets made again at another hold nothing of it.
-    /// </summary>
-    internal bool HasHistory(int width, int height) =>
-        _previous is { } last && last.Width == width && last.Height == height;
 
     /// <summary>
     /// Scales the plane so its normal is a unit; the far plane's is zero, and stays so.

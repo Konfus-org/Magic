@@ -302,11 +302,7 @@ public sealed class Renderer : Disposable, IRender<GlobalIlluminationInput, Indi
                 0,
                 1
             ),
-            DiffuseTermsOff =
-                (_terms.IsHitProbeLightOn ? 0u : 1u)
-                | (_terms.IsDiffuseSkyOn ? 0u : 2u)
-                | (_terms.IsShadowFillOn ? 0u : 4u)
-                | (_terms.IsPixelProbeLightOn ? 0u : 8u),
+            DiffuseTermsOff = (_terms.IsHitProbeLightOn ? 0u : 1u) | (_terms.IsDiffuseSkyOn ? 0u : 2u),
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         if (!graph.Upload(view.Constants, [gi]))

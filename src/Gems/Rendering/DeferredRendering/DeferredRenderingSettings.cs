@@ -175,4 +175,22 @@ public enum DebugView : uint
     /// The sun's contact shadow alone: black where it shadows. White where no shadow map is drawn.
     /// </summary>
     ContactShadows,
+
+    /// <summary>
+    /// The local lights' shadow atlas stretched over the view: nearer each tile's light is whiter, and black is
+    /// nothing. Black all over where no local light casts a shadow.
+    /// </summary>
+    ShadowAtlas,
+
+    /// <summary>
+    /// The ambient occlusion alone: white where all the ambient light reaches, black where none does. White all over
+    /// where no gem makes it.
+    /// </summary>
+    AmbientOcclusion,
+
+    /// <summary>
+    /// The share of the sky that a pixel's diffuse light sees: white in the open, black where no sky reaches. White all
+    /// over where no gem makes it.
+    /// </summary>
+    SkyVisibility,
 }

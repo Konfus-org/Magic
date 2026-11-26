@@ -13,6 +13,8 @@
         {"name": "ReferenceView.CabinSurfacesClose", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3075.130, "y": 1150.550, "z": -217.989}, "rotation": {"x": 0.046846, "y": -0.953161, "z": 0.211310, "w": 0.211310}}}},
         {"name": "ReferenceView.CabinLantern", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3073.212, "y": 1150.650, "z": -216.124}, "rotation": {"x": 0.023406, "y": -0.447606, "z": 0.011721, "w": 0.893843}}}},
         {"name": "ReferenceView.LeakRoom", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3069.870, "y": 1150.540, "z": -208.990}, "rotation": {"x": -0.173648, "y": 0.000000, "z": 0.000000, "w": 0.984808}}}},
+        {"name": "ReferenceView.CaveMouth", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3062.000, "y": 1152.0, "z": -197.000}, "rotation": {"x": 0.000000, "y": 1.000000, "z": 0.000000, "w": 0.000000}}}},
+        {"name": "ReferenceView.CaveDeep", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3062.000, "y": 1152.0, "z": -194.500}, "rotation": {"x": 0.000000, "y": 0.707107, "z": 0.000000, "w": 0.707107}}}},
         // The look: the sky gives 1.6 times the light of the air itself, which lifts the shadows and the room, and
         // the sun and the moon keep their own light.
         {"name": "Sky", "tags": ["sky"], "components": {"Sky": {"material": {"id": 4569236087865836549}, "brightness": 1.6}}},
@@ -37,6 +39,19 @@
                 {"name": "Wall +X", "components": {"Transform": {"position": {"x": 1.25, "y": 0, "z": 0}, "scale": {"x": 0.25, "y": 1.25, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
                 {"name": "Wall -Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": -1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
                 {"name": "Wall +Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": 1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}}
+            ]},
+        // A cave 8 m from the leak room: a shell of stonework 1 m thick around a tunnel 3 m wide and 2.5 m high. It
+        // goes 12 m in from its mouth, which faces -Z, and turns 90 degrees to +X for 8.5 m more, so the sky does not
+        // reach its end. The rock goes 4 m down under its floor, past the ground, which slopes. The cave-mouth view
+        // looks out at the mouth from inside, and the cave-deep view looks into the end past the turn.
+        {"name": "Cave", "components": {"Transform": {"position": {"x": -3062, "y": 1150.5, "z": -205}}},
+            "children": [
+                {"name": "Floor", "components": {"Transform": {"position": {"x": 4.25, "y": -2, "z": 6}, "scale": {"x": 6.75, "y": 2, "z": 7}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
+                {"name": "Roof", "components": {"Transform": {"position": {"x": 4.25, "y": 3, "z": 6.5}, "scale": {"x": 6.75, "y": 0.5, "z": 6.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
+                {"name": "Wall -X", "components": {"Transform": {"position": {"x": -2, "y": -0.25, "z": 6.5}, "scale": {"x": 0.5, "y": 3.75, "z": 6.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
+                {"name": "Wall +Z", "components": {"Transform": {"position": {"x": 4.25, "y": -0.25, "z": 12.5}, "scale": {"x": 6.75, "y": 3.75, "z": 0.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
+                {"name": "Wall +X", "components": {"Transform": {"position": {"x": 10.5, "y": -0.25, "z": 10.5}, "scale": {"x": 0.5, "y": 3.75, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
+                {"name": "Rock in the turn", "components": {"Transform": {"position": {"x": 6.25, "y": -0.25, "z": 4.5}, "scale": {"x": 4.75, "y": 3.75, "z": 4.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}}
             ]},
         {"name": "Cabin", "prefab": {"id": 300091}, "components": {"Transform": {"position": {"x": -3074.1, "y": 1149.4, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
         {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3085.824, "y": 1150.153, "z": -245.062}, "rotation": {"x": 0, "y": 0.51473, "z": 0, "w": 0.85735}, "scale": {"x": 0.988, "y": 0.988, "z": 0.988}}}},

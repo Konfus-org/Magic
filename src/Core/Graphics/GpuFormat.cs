@@ -23,6 +23,11 @@ public enum GpuFormat : byte
     D32Sfloat,
     Bc7Unorm,
     Bc7Srgb,
+
+    /// <summary>
+    /// 16-bit depth, only for the sky's direction maps: every other depth is <see cref="D32Sfloat"/>.
+    /// </summary>
+    D16Unorm,
 }
 
 public static class GpuFormatExtensions
@@ -32,7 +37,7 @@ public static class GpuFormatExtensions
         /// <summary>
         /// Whether the format holds depth, so that a texture of it is drawn into as the depth target.
         /// </summary>
-        public bool IsDepth => format == GpuFormat.D32Sfloat;
+        public bool IsDepth => format is GpuFormat.D32Sfloat or GpuFormat.D16Unorm;
 
         /// <summary>
         /// Whether a shader reads it as unsigned integers rather than as floats.

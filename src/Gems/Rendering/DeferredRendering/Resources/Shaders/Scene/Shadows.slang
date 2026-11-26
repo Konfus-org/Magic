@@ -31,6 +31,37 @@ public static const float DetailsWidestPenumbra = 32.0;
 
 public Shadows GetShadows() { return LoadFrameRow<Shadows>(ShadowsOffset); }
 
+// Where the local lights' shadow maps are in the frame's buffer, right after the shadows, and their bytes: C#'s
+// GpuLocalShadows.
+public static const uint LocalShadowsOffset = ShadowsOffset + ShadowsBytes;
+public static const uint LocalShadowsBytes = 64u;
+
+public struct LocalShadowMaps
+{
+    // The shadow table, a row a light of the light table, and the tiles; 0 where no shadow map shadows the local
+    // lights.
+    public uint lights;
+    public uint tiles;
+    // The local atlas, its min and max mips and how many levels those have, and the sampler of its gathers.
+    public uint atlas;
+    public uint minMips;
+    public uint maxMips;
+    public uint mipLevels;
+    public uint sampler;
+    // The taps of the blocker search and of the filter, the widest penumbra in texels, and the normal bias in texels at
+    // a glancing light.
+    public uint blockerTaps;
+    public uint filterTaps;
+    public float maxPenumbra;
+    public float normalBias;
+    public uint padding0;
+    // The world position the tiles are relative to.
+    public float3 anchor;
+    public uint padding1;
+}
+
+public LocalShadowMaps GetLocalShadowMaps() { return LoadFrameRow<LocalShadowMaps>(LocalShadowsOffset); }
+
 public static const uint ShadowSlots = 16u;
 
 // A pixel's words, all lit where there is no mask.

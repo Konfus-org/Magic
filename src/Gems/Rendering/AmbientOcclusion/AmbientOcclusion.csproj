@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/AmbientOcclusion/AmbientOcclusion.dll when a project lists AmbientOcclusion. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Hides the ambient light where surfaces meet, from the depth of each view, with ground-truth ambient occlusion.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
+         the renderer a project lists beside it, whose views it occludes. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+    <ProjectReference Include="../DeferredRendering/DeferredRendering.csproj" Private="false" />
+  </ItemGroup>
+</Project>

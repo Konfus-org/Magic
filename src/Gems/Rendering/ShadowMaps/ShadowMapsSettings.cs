@@ -83,4 +83,25 @@ public sealed class ShadowMapsSettings : ISettings
     /// behind another does not shadow.
     /// </summary>
     public float ContactShadowThickness { get; set; } = 0.05f;
+
+    /// <summary>
+    /// The texels along each side of the atlas that the local lights' tiles share, and of its cache of still depth.
+    /// </summary>
+    public int AtlasResolution { get; set; } = 4096;
+
+    /// <summary>
+    /// The fewest texels along a side of a local light's tile, which a far light keeps.
+    /// </summary>
+    public int MinTileSize { get; set; } = 32;
+
+    /// <summary>
+    /// The most texels along a side of a local light's tile, which a light the camera is in or near gets.
+    /// </summary>
+    public int MaxTileSize { get; set; } = 1024;
+
+    /// <summary>
+    /// The most tiles a frame whose still depth the cache draws again. A tile that waits draws all its casters each
+    /// frame, so a lower number costs time, not a wrong shadow.
+    /// </summary>
+    public int CacheTilesPerFrame { get; set; } = 32;
 }

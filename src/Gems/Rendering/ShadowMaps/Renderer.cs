@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
+using System.Drawing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
+using Magic.DeferredRendering.World;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -21,16 +23,38 @@ public readonly record struct CascadeFitInput(GpuView View);
 public readonly record struct SunShadowInput(GpuView View, CascadeViews Cascades, CascadeDepth Depth);
 
 /// <summary>
+/// What the local lights' fit takes once a frame: the world, with its lights and main camera, and the instances that
+/// changed.
+/// </summary>
+public readonly record struct LocalFitInput(GpuWorld World, GpuInstances Instances);
+
+/// <summary>
+/// What the local lights' shadows take once a frame: their tiles and the atlas with their depth drawn.
+/// </summary>
+public readonly record struct LocalResolveInput(LocalShadowViews Views, LocalShadowDepth Depth);
+
+/// <summary>
 /// Fits the sun's cascades to each view, and shadows each pixel of the view from their depth, into the frame's
 /// <see cref="ShadowMask"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Each frame it splits the view into cascades from the near plane to the shadow distance, fits a sphere around each
 /// cascade's slice of the view, and gives each the sphere's square from the sun, snapped to whole texels, so a shadow
 /// keeps still as the camera turns and moves. A geometry gem draws their depth. The resolve then writes the sun's
 /// slot of the mask and the ids of the mask into the frame's buffer.
+/// </para>
 /// </remarks>
-public sealed class Renderer : IRender<CascadeFitInput, CascadeViews>, IRender<SunShadowInput, ShadowMask>
+/// <para>
+/// Once a frame it also fits the local lights' tiles (<see cref="LocalTiles"/>), copies the tiles whose still depth the
+/// cache holds into the local atlas, and clears those that the cache draws again. After a geometry gem draws their
+/// depth, it builds the atlas's blocker mips and gives shading <see cref="LocalShadows"/>.
+/// </para>
+public sealed class Renderer
+    : IRender<CascadeFitInput, CascadeViews>,
+        IRender<SunShadowInput, ShadowMask>,
+        IRender<LocalFitInput, LocalShadowViews>,
+        IRender<LocalResolveInput, LocalShadows>
 {
     /// <summary>
     /// The most cascades a view has: two by two in the atlas.
@@ -70,6 +94,20 @@ public sealed class Renderer : IRender<CascadeFitInput, CascadeViews>, IRender<S
         "Build blocker mips 3",
     ];
 
+    private static readonly ImmutableArray<string> _localMipPasses =
+    [
+        "Build local blocker mips 0",
+        "Build local blocker mips 1",
+        "Build local blocker mips 2",
+        "Build local blocker mips 3",
+    ];
+
+    private readonly LocalTiles _localTiles = new();
+
+    private readonly IndexedDraw[] _tileDraws = new IndexedDraw[LocalTiles.MaxTiles];
+
+    private readonly DrawShaders _copyShaders;
+
     private readonly ShadowMapsSettings _settings;
 
     private readonly IGraphicsApi _gpu;
@@ -84,6 +122,14 @@ public sealed class Renderer : IRender<CascadeFitInput, CascadeViews>, IRender<S
         _gpu = gpu;
         _resolveShader = PassShaders.GetEntry(assets, "ResolveSunShadow", "ResolveSunShadow");
         _blockerMipShader = PassShaders.GetEntry(assets, "BuildBlockerMips", "BuildBlockerMips");
+        _copyShaders = new(
+            PassShaders.GetEntry(assets, "CopyShadowTiles", "CopyShadowTileVertex", ShaderStage.Vertex),
+            PassShaders.GetEntry(assets, "CopyShadowTiles", "CopyShadowTilePixel", ShaderStage.Pixel)
+        )
+        {
+            Depth = DepthMode.Always,
+            Cull = CullMode.None,
+        };
     }
 
     /// <summary>
@@ -198,25 +244,7 @@ public sealed class Renderer : IRender<CascadeFitInput, CascadeViews>, IRender<S
         if (!graph.Upload(constants.Value, [resolve]) || !graph.Upload(view.Frame, [row], GpuShadows.Offset))
             return null;
 
-        // The min and max mips of the atlas, a level a pass, for the blocker search where it reads wide.
-        for (int level = 0; level < BlockerMipLevels; level++)
-        {
-            ComputePass build = graph.Compute(
-                _blockerMipPasses[level],
-                _blockerMipShader,
-                new GpuConstants(atlas.Id, (uint)level, minMips.Value.Id, maxMips.Value.Id),
-                RenderStages.Geometry
-            );
-            if (level == 0)
-                build.Reads(atlas);
-            else
-                build.Reads(minMips.Value, level - 1).Reads(maxMips.Value, level - 1);
-
-            build
-                .Writes(minMips.Value, level)
-                .Writes(maxMips.Value, level)
-                .DispatchOver(Math.Max(mipSize >> level, 1), Math.Max(mipSize >> level, 1));
-        }
+        RecordBlockerMips(graph, _blockerMipPasses, atlas, minMips.Value, maxMips.Value, mipSize);
 
         graph
             .Compute(
@@ -243,6 +271,187 @@ public sealed class Renderer : IRender<CascadeFitInput, CascadeViews>, IRender<S
     }
 
     /// <summary>
+    /// Fits the local lights' tiles for this frame, uploads their rows, copies each tile that the cache holds into the
+    /// local atlas, and clears each tile of the cache that it draws again.
+    /// </summary>
+    /// <returns>
+    /// The tiles, or none while shadow maps are off, the copy's shaders build, or what they use is not made.
+    /// </returns>
+    public LocalShadowViews? Render(in RenderFrame frame, RenderGraph graph, in LocalFitInput input)
+    {
+        if (!_settings.IsShadowMapsOn)
+            return null;
+
+        GpuState state = _gpu.GetState(_copyShaders.Vertex, _copyShaders.Pixel);
+        if (state == GpuState.Failed)
+            frame.Fail(
+                RenderFailure.Shader,
+                "Local shadows are not drawn",
+                "a shader of the shadow cache was not built."
+            );
+
+        if (state != GpuState.Ready)
+            return null;
+
+        GpuWorld world = input.World;
+        _localTiles.Fit(world, input.Instances.Changed.Span, _settings);
+        int size = _localTiles.AtlasSize;
+        TextureDescription depth = new(
+            "Local shadow atlas",
+            size,
+            size,
+            GpuFormat.D32Sfloat,
+            TextureUsages.DepthTarget | TextureUsages.Sampled
+        );
+        Result<GpuTexture> atlas = _gpu.GetTexture(depth);
+        Result<GpuTexture> cache = _gpu.GetTexture(depth with { Name = "Shadow cache" });
+        Result<GpuBuffer> cacheViews = _gpu.GetBuffer(
+            new("Shadow cache views", (long)LocalTiles.MaxTiles * GpuShadowView.Bytes)
+        );
+        Result<GpuBuffer> atlasViews = _gpu.GetBuffer(
+            new("Local shadow views", (long)LocalTiles.MaxTiles * GpuShadowView.Bytes)
+        );
+        Result<GpuBuffer> lights = _gpu.GetBuffer(
+            new("Local light shadows", (long)_localTiles.Lights.Length * GpuLightShadow.Bytes)
+        );
+        Result<GpuBuffer> tiles = _gpu.GetBuffer(
+            new("Local shadow tiles", (long)LocalTiles.MaxTiles * GpuShadowTile.Bytes)
+        );
+        Result<GpuBuffer> indices = _gpu.GetBuffer(new("Shadow tile indices", 3 * sizeof(uint), BufferUsages.Index));
+        Result asked = Result.FindFailure(atlas, cache, cacheViews, atlasViews, lights, tiles, indices);
+        if (!asked.Ok)
+        {
+            frame.Fail(RenderFailure.Resource, "Local shadows are not drawn", asked.Error);
+
+            return null;
+        }
+
+        // An empty table still uploads one row, so a buffer that the shaders read is never left unwritten.
+        bool isStaged =
+            graph.Upload<uint>(indices.Value, [0, 1, 2])
+            && graph.Upload(cacheViews.Value, _localTiles.CacheViews.AsSpan(0, _localTiles.CacheCount))
+            && graph.Upload(atlasViews.Value, _localTiles.AtlasViews.AsSpan(0, _localTiles.AtlasCount))
+            && graph.Upload(lights.Value, _localTiles.Lights.AsSpan(0, Math.Max(_localTiles.LightCount, 1)))
+            && graph.Upload(tiles.Value, _localTiles.Tiles.AsSpan(0, Math.Max(_localTiles.TileCount, 1)));
+        if (!isStaged)
+            return null;
+
+        // The atlas is cleared, then each cached tile is copied in; the cache's tiles that draw again are cleared.
+        Span<IndexedDraw> draws = _tileDraws;
+        GpuConstants copy = new(cache.Value.Id, 0, 0, 0);
+        int copies = FillDraws(_localTiles.Copies.AsSpan(0, _localTiles.CopyCount), copy, draws);
+        graph
+            .Draw(
+                "Copy shadow cache",
+                _copyShaders,
+                GetDepthTarget(atlas.Value, TargetLoad.Clear),
+                copy,
+                RenderStages.Geometry
+            )
+            .Reads(cache.Value)
+            .DrawIndexed(indices.Value, draws[..copies]);
+        if (_localTiles.ClearCount > 0)
+        {
+            GpuConstants clear = new(0, 0, 0, 0);
+            int clears = FillDraws(_localTiles.Clears.AsSpan(0, _localTiles.ClearCount), clear, draws);
+            graph
+                .Draw(
+                    "Clear shadow cache tiles",
+                    _copyShaders,
+                    GetDepthTarget(cache.Value, TargetLoad.Keep),
+                    clear,
+                    RenderStages.Geometry
+                )
+                .DrawIndexed(indices.Value, draws[..clears]);
+        }
+
+        return new LocalShadowViews
+        {
+            CacheViews = cacheViews.Value,
+            CacheCount = _localTiles.CacheCount,
+            AtlasViews = atlasViews.Value,
+            AtlasCount = _localTiles.AtlasCount,
+            Cache = cache.Value,
+            Atlas = atlas.Value,
+            AtlasSize = size,
+            Lights = lights.Value,
+            Tiles = tiles.Value,
+            Anchor = world.Eye.Position,
+        };
+
+        static GpuRenderTargets GetDepthTarget(GpuTexture texture, TargetLoad load) =>
+            new()
+            {
+                Depth = new GpuTarget { Texture = texture, Load = load },
+            };
+
+        static int FillDraws(ReadOnlySpan<Rectangle> rects, GpuConstants constants, Span<IndexedDraw> draws)
+        {
+            for (int i = 0; i < rects.Length; i++)
+            {
+                draws[i] = new IndexedDraw
+                {
+                    Scissor = rects[i],
+                    Constants = constants,
+                    IndexCount = 3,
+                };
+            }
+
+            return rects.Length;
+        }
+    }
+
+    /// <summary>
+    /// Builds the min and max mips of the local atlas once its tiles' depth is drawn, for the blocker search.
+    /// </summary>
+    /// <returns>
+    /// What shading reads to shadow the local lights, or none while the shader builds or the mips are not made.
+    /// </returns>
+    public LocalShadows? Render(in RenderFrame frame, RenderGraph graph, in LocalResolveInput input)
+    {
+        GpuState state = _gpu.GetState(_blockerMipShader);
+        if (state != GpuState.Ready)
+            return null;
+
+        GpuTexture atlas = input.Depth.Atlas;
+        int mipSize = Math.Max(input.Views.AtlasSize / 2, 1);
+        Result<GpuTexture> minMips = _gpu.GetTexture(
+            new("Local min mips", mipSize, mipSize, GpuFormat.R32Sfloat, Levels: BlockerMipLevels)
+        );
+        Result<GpuTexture> maxMips = _gpu.GetTexture(
+            new("Local max mips", mipSize, mipSize, GpuFormat.R32Sfloat, Levels: BlockerMipLevels)
+        );
+        Result<GpuSampler> sampler = _gpu.GetSampler(
+            new SamplerDescription { Filter = TextureFilter.Nearest, Wrap = TextureWrap.Clamp }
+        );
+        Result asked = Result.FindFailure(minMips, maxMips, sampler);
+        if (!asked.Ok)
+        {
+            frame.Fail(RenderFailure.Resource, "Local shadows are not resolved", asked.Error);
+
+            return null;
+        }
+
+        RecordBlockerMips(graph, _localMipPasses, atlas, minMips.Value, maxMips.Value, mipSize);
+
+        return new LocalShadows
+        {
+            Lights = input.Views.Lights,
+            Tiles = input.Views.Tiles,
+            Atlas = atlas,
+            MinMips = minMips.Value,
+            MaxMips = maxMips.Value,
+            MipLevels = BlockerMipLevels,
+            Sampler = sampler.Value,
+            Anchor = input.Views.Anchor,
+            BlockerTaps = Math.Clamp(_settings.BlockerTaps, 1, 64),
+            FilterTaps = Math.Clamp(_settings.FilterTaps, 1, 64),
+            MaxPenumbraTexels = Math.Clamp(_settings.MaxPenumbraTexels, 1, ShadowMask.WidestPenumbra),
+            NormalBias = _settings.NormalBias,
+        };
+    }
+
+    /// <summary>
     /// The depth of split <paramref name="index"/> of <paramref name="count"/> from the near to the far end: the mix
     /// of the logarithmic and the even split by <paramref name="lambda"/>.
     /// </summary>
@@ -261,6 +470,38 @@ public sealed class Renderer : IRender<CascadeFitInput, CascadeViews>, IRender<S
     /// The plane scaled so its normal is a unit.
     /// </summary>
     private static Vector4 ToPlane(Vector4 plane) => plane / new Vector3(plane.X, plane.Y, plane.Z).Length();
+
+    /// <summary>
+    /// Records the min and max mips of a depth atlas, a level a pass, for the blocker search where it reads wide.
+    /// </summary>
+    private void RecordBlockerMips(
+        RenderGraph graph,
+        ImmutableArray<string> names,
+        GpuTexture atlas,
+        GpuTexture minMips,
+        GpuTexture maxMips,
+        int mipSize
+    )
+    {
+        for (int level = 0; level < BlockerMipLevels; level++)
+        {
+            ComputePass build = graph.Compute(
+                names[level],
+                _blockerMipShader,
+                new GpuConstants(atlas.Id, (uint)level, minMips.Id, maxMips.Id),
+                RenderStages.Geometry
+            );
+            if (level == 0)
+                build.Reads(atlas);
+            else
+                build.Reads(minMips, level - 1).Reads(maxMips, level - 1);
+
+            build
+                .Writes(minMips, level)
+                .Writes(maxMips, level)
+                .DispatchOver(Math.Max(mipSize >> level, 1), Math.Max(mipSize >> level, 1));
+        }
+    }
 
     /// <summary>
     /// Writes a row into <paramref name="rows"/> for each cascade of <paramref name="view"/>, nearest first, each in its

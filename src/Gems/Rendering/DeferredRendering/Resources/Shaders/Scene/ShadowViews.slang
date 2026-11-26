@@ -14,15 +14,53 @@ public struct GpuShadowView
     public uint4 rect;
     // What takes the view's clip x and y into the atlas's: the scale in xy, then the offset in zw.
     public float4 atlasTransform;
-    // The unit direction towards the light, and the metres that one texel covers.
+    // The unit direction towards the light, and the metres that one texel covers: at any depth in an orthographic
+    // view, and a metre from the light in a perspective one.
     public float3 towards;
     public float texelSize;
     // 1 for an orthographic view: a caster nearer the light than its near plane is drawn at the near plane.
     public uint isOrthographic;
-    // The metres from the near plane to the far plane, which a difference of reversed depth in an orthographic view is
-    // a share of.
+    // An orthographic view's metres from the near plane to the far plane, which a difference of reversed depth is a
+    // share of, or a perspective view's metres to its near plane, which a reversed depth is over the view depth.
     public float depthRange;
-    public uint2 padding;
+    // Which casters it draws: ShadowCasters.
+    public uint casters;
+    public uint padding;
+}
+
+// Which casters a shadow view draws, C#'s ShadowCasters: all, only the still ones that a cache holds, or only the
+// dynamic bodies, drawn over a copy of the cache.
+public enum ShadowCasters : uint
+{
+    All,
+    Still,
+    Moving,
+}
+
+// The metres one texel of the view covers at a view depth.
+public float GetTexelSizeAt(GpuShadowView view, float viewDepth)
+{
+    return view.isOrthographic != 0u ? view.texelSize : view.texelSize * viewDepth;
+}
+
+// A local light's row of the shadow table, C#'s GpuLightShadow, 16 bytes: its first tile, NoShadowTile for none, its
+// faces, and the width of its source in metres.
+public struct GpuLightShadow
+{
+    public uint firstTile;
+    public uint faceCount;
+    public float lightWidth;
+    public float padding;
+}
+
+public static const uint NoShadowTile = 0xFFFFFFFFu;
+
+// A tile of the local atlas, C#'s GpuShadowTile, 80 bytes: the anchor-relative world to its clip space, with reversed
+// depth and no far plane, and its rectangle of the atlas in texels, of width 0 for a face that is not drawn.
+public struct GpuShadowTile
+{
+    public float4x4 viewProjection;
+    public uint4 rect;
 }
 
 public GpuShadowView LoadShadowView(uint table, uint index)

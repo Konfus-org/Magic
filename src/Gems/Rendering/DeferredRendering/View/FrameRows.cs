@@ -208,16 +208,113 @@ public record struct GpuShadows
 }
 
 /// <summary>
+/// The shadow maps of the frame's local lights: the tables and atlas of <see cref="LocalShadows"/>, how the filter
+/// reads them, and the world position their tiles are relative to.
+/// </summary>
+/// <remarks>
+/// The twin of <c>Scene/Shadows.slang</c>'s <c>LocalShadowMaps</c>, written once a frame into the frame's buffer after
+/// <see cref="GpuShadows"/> by the shading's step, and all 0 where nothing shadows the local lights.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuLocalShadows
+{
+    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+
+    public const int Bytes = 64;
+
+    public uint Lights;
+
+    public uint Tiles;
+
+    public uint Atlas;
+
+    public uint MinMips;
+
+    public uint MaxMips;
+
+    public uint MipLevels;
+
+    public uint Sampler;
+
+    public uint BlockerTaps;
+
+    public uint FilterTaps;
+
+    public float MaxPenumbra;
+
+    public float NormalBias;
+
+    public uint Padding0;
+
+    public Vector3 Anchor;
+
+    public uint Padding1;
+}
+
+/// <summary>
+/// The ambient light's terms that gems make for the view: the ambient occlusion and its bent normal, the sky's
+/// irradiance and its reflection map, and how much of the sky each pixel sees.
+/// </summary>
+/// <remarks>
+/// The twin of <c>Light/Ambient.slang</c>'s <c>AmbientTerms</c>, written once a frame into the frame's buffer after
+/// <see cref="GpuLocalShadows"/> by the shading's step. A 0 is a term that no gem makes.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuAmbient
+{
+    public const int Offset = GpuLocalShadows.Offset + GpuLocalShadows.Bytes;
+
+    public const int Bytes = 32;
+
+    /// <summary>
+    /// The visibility of the ambient light at each pixel, from 0 to 1.
+    /// </summary>
+    public uint Occlusion;
+
+    /// <summary>
+    /// The mean direction in which each pixel sees its ambient light, octahedral, in world axes.
+    /// </summary>
+    public uint BentNormal;
+
+    /// <summary>
+    /// The buffer of the sky's irradiance: 9 coefficients of RGB spherical harmonics.
+    /// </summary>
+    public uint SkyIrradiance;
+
+    /// <summary>
+    /// The octahedral map of the sky, each level prefiltered for a roughness.
+    /// </summary>
+    public uint SkyMap;
+
+    public uint SkyMapLevels;
+
+    /// <summary>
+    /// How much of the sky each pixel sees: diffuse in red, specular in green.
+    /// </summary>
+    public uint SkyVisibility;
+
+    /// <summary>
+    /// The linear sampler that clamps, which the sky map and the sky visibility are read with.
+    /// </summary>
+    public uint Sampler;
+
+    /// <summary>
+    /// The volume of the far sky probes, 0 for none.
+    /// </summary>
+    public uint SkyProbes;
+}
+
+/// <summary>
 /// The light that reaches the view's surfaces indirectly: the traced diffuse light and reflections and the probe grid.
 /// </summary>
 /// <remarks>
 /// The twin of <c>Light/Indirect.slang</c> IndirectLight, written once a frame into the frame's buffer after
-/// <see cref="GpuShadows"/> by what traces them, and all 0 where nothing does.
+/// <see cref="GpuAmbient"/> by what traces them, and all 0 where nothing does.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuIndirectLight
 {
-    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+    public const int Offset = GpuAmbient.Offset + GpuAmbient.Bytes;
 
     public const int Bytes = 56;
 

@@ -326,6 +326,11 @@ public struct Atmosphere : ISky
         return inputs.sunIlluminance * SampleTransmittance(transmittance, sampler, r, inputs.sunDirection.y);
     }
 
+    public static float3 GetGroundAlbedo()
+    {
+        return GroundAlbedo;
+    }
+
     public static float3 GetAmbient(SkyInputs inputs, float3 normal)
     {
         // The sky over the surface's hemisphere, sampled where it is brightest and around.

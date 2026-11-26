@@ -68,6 +68,16 @@ public readonly record struct GpuWorld
     public required int PreparedDomains { get; init; }
 
     /// <summary>
+    /// The frame's local lights, which every view shares.
+    /// </summary>
+    public LocalLights LocalLights => Lights.Local;
+
+    /// <summary>
+    /// The camera that what the views share is seen from.
+    /// </summary>
+    public WorldEye Eye { get; init; }
+
+    /// <summary>
     /// The models' row of a frame buffer: the pools and tables the instances are drawn from.
     /// </summary>
     internal GpuModels ModelsRow =>
@@ -93,16 +103,6 @@ public readonly record struct GpuWorld
     internal Size Picture { get; init; }
 
     internal LightBuffers Lights { get; init; }
-
-    /// <summary>
-    /// The frame's local lights, which every view shares.
-    /// </summary>
-    public LocalLights LocalLights => Lights.Local;
-
-    /// <summary>
-    /// The camera that what the views share is seen from.
-    /// </summary>
-    public WorldEye Eye { get; init; }
 
     /// <summary>
     /// The screenshot asked for in this frame; none in most.

@@ -2,25 +2,25 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
 using Magic.DeferredRendering;
-using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// Draws the depth of the clusters that cast into each shadow view into the views' atlas.
+/// Draws the depth of the clusters that cast into each of a list of shadow views into their atlas.
 /// </summary>
 /// <remarks>
 /// The GPU culls each instance's clusters against each view and the view's texel, and lists each that passes with its
 /// view. Then one indirect draw a pipeline draws the whole list into the atlas, each cluster into its view's
-/// rectangle. The cull reads the impostor handoff from the camera's frame, and the pools from the cluster constants
-/// that the view's passes write into it.
+/// rectangle. The cull reads the impostor handoff from the frame it is given, and the pools from the cluster constants
+/// in that frame's buffer. The sun's cascades are drawn for each view, from the view's frame; the local lights' tiles
+/// once a frame, from the world's.
 /// </remarks>
 internal sealed class ShadowPasses
 {
     /// <summary>
-    /// The rows of the shadow list: 12 MB.
+    /// The rows of a shadow list: 12 MB.
     /// </summary>
     private const int MaxShadowClusters = 1 << 20;
 
@@ -96,55 +96,33 @@ internal sealed class ShadowPasses
     internal ImmutableArray<ShaderEntry> Shaders { get; }
 
     /// <summary>
-    /// Culls and draws the clusters that cast into <paramref name="cascades"/> into their atlas, for the view of this
-    /// turn.
+    /// Culls and draws the clusters that cast into the views of <paramref name="target"/> into its atlas.
     /// </summary>
-    internal Result<CascadeDepth> Record(
-        in RenderFrame frame,
-        RenderGraph graph,
-        GpuView view,
-        ClusterPools pools,
-        CascadeViews cascades
-    )
+    /// <remarks>
+    /// The first draw clears the atlas when the target asks for it; else every draw keeps what the atlas holds.
+    /// </remarks>
+    internal Result Record(RenderGraph graph, ShadowTarget target, ClusterPools pools)
     {
-        Result<GpuTexture> atlas = _gpu.GetTexture(
+        ShadowPassNames names = target.Names;
+        int? view = target.View;
+        Result<GpuBuffer> constants = GetBuffer(new(names.Constants, Unsafe.SizeOf<ShadowCullConstants>()));
+        Result<GpuBuffer> counts = GetBuffer(new(names.Counts, CountWords * sizeof(uint), IndirectUsage));
+        Result<GpuBuffer> shadowClusters = GetBuffer(new(names.Clusters, (long)MaxShadowClusters * ShadowClusterBytes));
+        Result<GpuBuffer> drawArguments = GetBuffer(
             new(
-                "Cascade atlas",
-                cascades.AtlasSize,
-                cascades.AtlasSize,
-                GpuFormat.D32Sfloat,
-                TextureUsages.DepthTarget | TextureUsages.Sampled
-            ),
-            frame.View
-        );
-        Result<GpuBuffer> constants = _gpu.GetBuffer(
-            new("Cascade cull constants", Unsafe.SizeOf<ShadowCullConstants>()),
-            frame.View
-        );
-        Result<GpuBuffer> counts = _gpu.GetBuffer(
-            new("Cascade counts", CountWords * sizeof(uint), IndirectUsage),
-            frame.View
-        );
-        Result<GpuBuffer> shadowClusters = _gpu.GetBuffer(
-            new("Cascade clusters", (long)MaxShadowClusters * ShadowClusterBytes),
-            frame.View
-        );
-        Result<GpuBuffer> drawArguments = _gpu.GetBuffer(
-            new(
-                "Cascade draw arguments",
+                names.DrawArguments,
                 (long)MaxShadowDraws * ((int)ShadowDrawRegion.Impostors + 1) * DrawArgumentsBytes,
                 IndirectUsage
-            ),
-            frame.View
+            )
         );
-        Result asked = Result.FindFailure(atlas, constants, counts, shadowClusters, drawArguments);
+        Result asked = Result.FindFailure(constants, counts, shadowClusters, drawArguments);
         if (!asked.Ok)
-            return Result.Failure(asked.Error);
+            return asked;
 
         ShadowCullConstants cull = new()
         {
-            Views = cascades.Views.Id,
-            ViewCount = (uint)cascades.Count,
+            Views = target.Views.Id,
+            ViewCount = (uint)target.ViewCount,
             ShadowClusters = shadowClusters.Value.Id,
             DrawArguments = drawArguments.Value.Id,
             Counts = counts.Value.Id,
@@ -154,64 +132,52 @@ internal sealed class ShadowPasses
         Span<uint> zeros = stackalloc uint[CountWords];
         zeros.Clear();
         if (!graph.Upload(constants.Value, [cull]) || !graph.Upload(counts.Value, zeros))
-            return Result.Failure("the cascades' cull constants were not staged.");
+            return Result.Failure("the shadow cull's constants were not staged.");
 
-        // Cull: one group an instance, over every cascade.
-        GpuConstants header = new(view.Frame.Id, constants.Value.Id);
-        uint across = (uint)Math.Min(view.InstanceCount, CullGroupsPerRow);
-        uint down = (uint)Math.Max((view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow, 1);
+        // Cull: one group an instance, over every view.
+        GpuBuffer frameBuffer = target.Frame;
+        GpuConstants header = new(frameBuffer.Id, constants.Value.Id);
+        uint across = (uint)Math.Min(target.InstanceCount, CullGroupsPerRow);
+        uint down = (uint)Math.Max((target.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow, 1);
         graph
-            .Compute("Cull shadow clusters", _cullShader, header, RenderStages.Geometry)
+            .Compute(names.Cull, _cullShader, header, RenderStages.Geometry)
             .Reads(
-                view.Frame,
+                frameBuffer,
                 constants.Value,
-                cascades.Views,
-                view.Instances,
-                view.Materials,
+                target.Views,
+                target.Instances,
+                target.Materials,
                 pools.Clusters,
                 pools.Models
             )
             .Writes(counts.Value, shadowClusters.Value, drawArguments.Value)
             .Dispatch(across, down);
 
-        // Draw: the first pass clears the whole atlas, each cluster draws into its cascade's rectangle.
-        Draw("Draw shadow depth", _singleSidedShaders, TargetLoad.Clear, ShadowDrawRegion.SingleSided);
-        Draw("Draw shadow depth double-sided", _doubleSidedShaders, TargetLoad.Keep, ShadowDrawRegion.DoubleSided);
-        Draw("Draw shadow depth fading", _fadingShaders, TargetLoad.Keep, ShadowDrawRegion.Fading);
-        Draw(
-            "Draw shadow depth fading double-sided",
-            _fadingDoubleSidedShaders,
-            TargetLoad.Keep,
-            ShadowDrawRegion.FadingDoubleSided
-        );
+        // Draw: the first pass clears the atlas where the target asks, each cluster draws into its view's rectangle.
+        TargetLoad first = target.IsCleared ? TargetLoad.Clear : TargetLoad.Keep;
+        GpuTexture atlas = target.Atlas;
+        Draw(names.SingleSided, _singleSidedShaders, first, ShadowDrawRegion.SingleSided);
+        Draw(names.DoubleSided, _doubleSidedShaders, TargetLoad.Keep, ShadowDrawRegion.DoubleSided);
+        Draw(names.Fading, _fadingShaders, TargetLoad.Keep, ShadowDrawRegion.Fading);
+        Draw(names.FadingDoubleSided, _fadingDoubleSidedShaders, TargetLoad.Keep, ShadowDrawRegion.FadingDoubleSided);
         DrawIndirect(
             graph
-                .Draw(
-                    "Draw shadow impostors",
-                    _impostorShaders,
-                    GetTargets(TargetLoad.Keep),
-                    header,
-                    RenderStages.Geometry
-                )
-                .Reads(
-                    view.Frame,
-                    constants.Value,
-                    cascades.Views,
-                    shadowClusters.Value,
-                    view.Instances,
-                    pools.Impostors
-                )
-                .Reads(pools.Models, view.Materials)
+                .Draw(names.Impostors, _impostorShaders, GetTargets(TargetLoad.Keep), header, RenderStages.Geometry)
+                .Reads(frameBuffer, constants.Value, target.Views, shadowClusters.Value, target.Instances)
+                .Reads(pools.Impostors, pools.Models, target.Materials)
                 .Reads(pools.Atlases.AsSpan()),
             ShadowDrawRegion.Impostors
         );
 
-        return Result.Success(new CascadeDepth(atlas.Value));
+        return Result.Success();
+
+        Result<GpuBuffer> GetBuffer(in BufferDescription description) =>
+            view is { } index ? _gpu.GetBuffer(description, index) : _gpu.GetBuffer(description);
 
         GpuRenderTargets GetTargets(TargetLoad load) =>
             new()
             {
-                Depth = new GpuTarget { Texture = atlas.Value, Load = load },
+                Depth = new GpuTarget { Texture = atlas, Load = load },
             };
 
         void Draw(string name, in DrawShaders shaders, TargetLoad load, ShadowDrawRegion region) =>
@@ -219,12 +185,12 @@ internal sealed class ShadowPasses
                 graph
                     .Draw(name, shaders, GetTargets(load), header, RenderStages.Geometry)
                     .Reads(
-                        view.Frame,
+                        frameBuffer,
                         constants.Value,
-                        cascades.Views,
+                        target.Views,
                         shadowClusters.Value,
-                        view.Instances,
-                        view.Vertices,
+                        target.Instances,
+                        target.Vertices,
                         pools.Vertices,
                         pools.Clusters,
                         pools.Models,
@@ -257,4 +223,66 @@ internal sealed class ShadowPasses
         FadingDoubleSided,
         Impostors,
     }
+}
+
+/// <summary>
+/// What one set of shadow passes draws: the views, the frame whose camera and pools the cull reads, the instances, and
+/// the atlas, cleared first or kept.
+/// </summary>
+/// <remarks>
+/// A target of a view keeps its buffers for that <see cref="View"/>; one of the whole frame, with no view, keeps one
+/// set.
+/// </remarks>
+internal readonly record struct ShadowTarget
+{
+    public required ShadowPassNames Names { get; init; }
+
+    public required GpuBuffer Frame { get; init; }
+
+    public required int? View { get; init; }
+
+    public required GpuBuffer Views { get; init; }
+
+    public required int ViewCount { get; init; }
+
+    public required GpuBuffer Instances { get; init; }
+
+    public required int InstanceCount { get; init; }
+
+    public required GpuBuffer Materials { get; init; }
+
+    public required GpuBuffer Vertices { get; init; }
+
+    public required GpuTexture Atlas { get; init; }
+
+    public required bool IsCleared { get; init; }
+}
+
+/// <summary>
+/// The names of a set of shadow passes and of their buffers. GPU timings and resources are kept by name, so each set
+/// has its own.
+/// </summary>
+/// <param name="prefix">The set's name at the start of a name, such as "Shadow cache".</param>
+/// <param name="inner">The set's name inside a name, such as "shadow cache".</param>
+internal sealed class ShadowPassNames(string prefix, string inner)
+{
+    public string Constants { get; } = $"{prefix} cull constants";
+
+    public string Counts { get; } = $"{prefix} counts";
+
+    public string Clusters { get; } = $"{prefix} clusters";
+
+    public string DrawArguments { get; } = $"{prefix} draw arguments";
+
+    public string Cull { get; } = $"Cull {inner} clusters";
+
+    public string SingleSided { get; } = $"Draw {inner} depth";
+
+    public string DoubleSided { get; } = $"Draw {inner} depth double-sided";
+
+    public string Fading { get; } = $"Draw {inner} depth fading";
+
+    public string FadingDoubleSided { get; } = $"Draw {inner} depth fading double-sided";
+
+    public string Impostors { get; } = $"Draw {inner} impostors";
 }

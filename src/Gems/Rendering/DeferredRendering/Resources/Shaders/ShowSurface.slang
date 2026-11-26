@@ -16,6 +16,7 @@ import Core.Color;
 import Core.Random;
 import Light.Indirect;
 import Scene.Shadows;
+import Light.Ambient;
 
 // C#'s DebugView.
 enum DebugView : uint
@@ -34,6 +35,9 @@ enum DebugView : uint
     ShadowCascades,
     Penumbra,
     ContactShadows,
+    ShadowAtlas,
+    AmbientOcclusion,
+    SkyVisibility,
 }
 
 // Set in the pass header's y, over the view, when no effects finished the picture; C#'s Renderer.NoEffects.
@@ -99,11 +103,11 @@ float3 GetLightView(FrameConstants frame, DebugView view, uint2 pixel)
     return SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, LoadNormal(frame.gbufferNormal, pixel)).rgb;
 }
 
-// The sun's cascade atlas at the pixel, stretched over the view: the reversed depth on a log scale, so the casters near
-// the far end of a cascade and those near the sun both read, whiter nearer the sun. Black where nothing was drawn.
-float3 GetCascadeAtlasView(FrameConstants frame, uint2 pixel)
+// A shadow atlas at the pixel, stretched over the view: the reversed depth on a log scale, so the casters near the far
+// end of a view and those near its light both read, whiter nearer the light. Black where nothing was drawn.
+float3 GetAtlasView(FrameConstants frame, uint atlasId, uint2 pixel)
 {
-    TextureRef atlas = { GetShadows().cascadeAtlas };
+    TextureRef atlas = { atlasId };
     if (atlas.id == 0u)
         return float3(0.0);
 
@@ -140,6 +144,18 @@ float3 GetSunShadowView(FrameConstants frame, DebugView view, uint2 pixel)
     return colors[min(uint(cascade + 0.5) - 1u, 3u)] * (1.0 - 0.5 * detail.w);
 }
 
+// The diffuse sky visibility of a pixel's surface, grey; white where no surface is.
+float3 GetSkyVisibilityView(FrameConstants frame, uint2 pixel)
+{
+    TextureRef depthTexture = { frame.depth };
+    float depth = depthTexture.Load(pixel, 0u).x;
+    if (depth <= 0.0)
+        return float3(1.0);
+
+    float3 normal = LoadNormal(frame.gbufferNormal, pixel);
+    return float3(LoadSkyVisibility(GetAmbientTerms(), frame, pixel, depth, normal).x);
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ShowLight(uint3 thread : SV_DispatchThreadID)
@@ -174,10 +190,16 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
     float3 color = isPicture
         ? pow(saturate(ToSrgb(light)), 1.0 / gamma)
         : view == DebugView.CascadeAtlas
-            ? GetCascadeAtlasView(frame, thread.xy)
-            : view == DebugView.ShadowCascades || view == DebugView.Penumbra || view == DebugView.ContactShadows
-                ? GetSunShadowView(frame, view, thread.xy)
-                : GetSurfaceView(frame, view, depthViewFar, thread.xy);
+            ? GetAtlasView(frame, GetShadows().cascadeAtlas, thread.xy)
+        : view == DebugView.ShadowAtlas
+            ? GetAtlasView(frame, GetLocalShadowMaps().atlas, thread.xy)
+        : view == DebugView.AmbientOcclusion
+            ? float3(LoadAmbientOcclusion(GetAmbientTerms(), thread.xy))
+        : view == DebugView.SkyVisibility
+            ? GetSkyVisibilityView(frame, thread.xy)
+        : view == DebugView.ShadowCascades || view == DebugView.Penumbra || view == DebugView.ContactShadows
+            ? GetSunShadowView(frame, view, thread.xy)
+            : GetSurfaceView(frame, view, depthViewFar, thread.xy);
 
     // Triangular noise of up to one 8-bit step, new each frame, so a smooth gradient has no bands where the output
     // rounds it to 8 bits (Lipshitz, Wannamaker and Vanderkooy, "Quantization and Dither: A Theoretical Survey",

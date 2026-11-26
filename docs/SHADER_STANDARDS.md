@@ -34,4 +34,7 @@ The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers
 - Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
 - The material contract and the shading models live once in the shared shader library in `src/Resources/Shaders/`.
   Every renderer shades with them. A renderer's own tables and techniques, its BRDF included, go in its gem.
-- Write a technique from its paper and name the paper in a comment. No third-party shader code.
+- Write a technique from its paper and name the paper in a comment. Third-party shader code is allowed only when it is a
+  reference port under a permissive licence: keep its licence in a `THIRD-PARTY-NOTICES.md` beside the file, name the
+  source and its licence in a comment at the top of the file, and change it to these standards. GTAO (XeGTAO, MIT) is
+  the one such port.

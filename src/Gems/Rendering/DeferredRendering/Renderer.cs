@@ -48,6 +48,10 @@ public readonly record struct ShadingInput(
     TracedWorld? Traced,
     SkyTables? Sky,
     ShadowMask? Shadows,
+    LocalShadows? LocalShadows,
+    AmbientOcclusion? Occlusion,
+    SkyLight? SkyLight,
+    SkyVisibility? SkyVisibility,
     IndirectLight? Light,
     Reflections? Reflections,
     Air? Air,
@@ -742,6 +746,46 @@ public sealed class Renderer
         DebugView renderView = _state.RenderView;
         TextureFilter upscaleFilter = _settings.UpscaleFilter;
 
+        // The local lights' shadow maps, where a gem drew them: not staged, the row stays 0 and nothing is shadowed.
+        LocalShadows? local = null;
+        if (input.LocalShadows is { } localShadows)
+        {
+            GpuLocalShadows row = new()
+            {
+                Lights = localShadows.Lights.Id,
+                Tiles = localShadows.Tiles.Id,
+                Atlas = localShadows.Atlas.Id,
+                MinMips = localShadows.MinMips.Id,
+                MaxMips = localShadows.MaxMips.Id,
+                MipLevels = (uint)localShadows.MipLevels,
+                Sampler = localShadows.Sampler.Id,
+                BlockerTaps = (uint)localShadows.BlockerTaps,
+                FilterTaps = (uint)localShadows.FilterTaps,
+                MaxPenumbra = localShadows.MaxPenumbraTexels,
+                NormalBias = localShadows.NormalBias,
+                Anchor = localShadows.Anchor,
+            };
+            if (graph.Upload(gpu.Frame, [row], GpuLocalShadows.Offset))
+                local = localShadows;
+        }
+
+        // The ambient terms that gems make: those not staged stay 0, and the ambient light is not dimmed by them.
+        AmbientOcclusion? occlusion = null;
+        SkyLight? skyLight = null;
+        GpuAmbient ambient = new()
+        {
+            Occlusion = input.Occlusion?.Occlusion.Id ?? 0,
+            BentNormal = input.Occlusion?.BentNormal.Id ?? 0,
+            SkyIrradiance = input.SkyLight?.Irradiance.Id ?? 0,
+            SkyMap = input.SkyLight?.Map.Id ?? 0,
+            SkyMapLevels = (uint)(input.SkyLight?.MapLevels ?? 0),
+            Sampler = input.SkyLight?.Sampler.Id ?? 0,
+            SkyVisibility = input.SkyVisibility?.Visibility.Id ?? 0,
+        };
+        SkyVisibility? skySeen = null;
+        if (graph.Upload(gpu.Frame, [ambient], GpuAmbient.Offset))
+            (occlusion, skyLight, skySeen) = (input.Occlusion, input.SkyLight, input.SkyVisibility);
+
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ?
             [
@@ -777,6 +821,18 @@ public sealed class Renderer
             .Reads(indirect);
         if (input.Shadows is { } shadows)
             shade.Reads(shadows.Mask, shadows.SunTint);
+
+        if (local is { } drawn)
+            shade.Reads(drawn.Lights, drawn.Tiles, drawn.Atlas, drawn.MinMips, drawn.MaxMips);
+
+        if (occlusion is { } occluded)
+            shade.Reads(occluded.Occlusion, occluded.BentNormal);
+
+        if (skyLight is { } skyMade)
+            shade.Reads(skyMade.Irradiance, skyMade.Map);
+
+        if (skySeen is { } seen)
+            shade.Reads(seen.Visibility);
 
         if (input.Air is { Clouds: { } clouds })
             shade.Reads(clouds);
@@ -866,6 +922,8 @@ public sealed class Renderer
             )
             .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal, gpu.GBufferBase, gpu.GBufferSurface, gpu.Velocity, gpu.Hdr)
             .Reads(input.Shadows?.CascadeAtlas ?? GpuTexture.None, input.Shadows?.SunDetails ?? GpuTexture.None)
+            .Reads(local?.Atlas ?? GpuTexture.None, occlusion?.Occlusion ?? GpuTexture.None)
+            .Reads(skySeen?.Visibility ?? GpuTexture.None)
             .Writes(gpu.Output)
             .DispatchOver(gpu.Width, gpu.Height);
 
