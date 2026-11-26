@@ -27,19 +27,19 @@ public readonly record struct ClusteredGeometryInput(GpuView? View, ClusterPools
 /// What the cluster renderer takes to draw the sun's shadow maps of a view: the view, the pools the frame's models are
 /// clustered in, and the view's cascades.
 /// </summary>
-public readonly record struct CascadeDepthInput(GpuView View, ClusterPools Pools, CascadeViews Cascades);
+public readonly record struct CascadeDepthInput(GpuView View, ClusterPools Pools, CascadeViews? Cascades);
 
 /// <summary>
 /// What the cluster renderer takes to draw the local lights' shadow maps, once a frame: the world, the pools the
 /// frame's models are clustered in, and the lights' tiles.
 /// </summary>
-public readonly record struct LocalDepthInput(GpuWorld World, ClusterPools Pools, LocalShadowViews Views);
+public readonly record struct LocalDepthInput(GpuWorld World, ClusterPools Pools, LocalShadowViews? Views);
 
 /// <summary>
 /// What the cluster renderer takes to draw the sky's direction maps, once a frame: the world, the pools the frame's
 /// models are clustered in, and the maps' draws.
 /// </summary>
-public readonly record struct SkyDepthInput(GpuWorld World, ClusterPools Pools, SkyViews Views);
+public readonly record struct SkyDepthInput(GpuWorld World, ClusterPools Pools, SkyViews? Views);
 
 /// <summary>
 /// Draws every model that the world holds as a hierarchy of clusters, GPU-driven, and far away as its impostor.
@@ -196,6 +196,10 @@ public sealed class Renderer
     /// </summary>
     public CascadeDepth? Render(in RenderFrame frame, RenderGraph graph, in CascadeDepthInput input)
     {
+        // Without the gem that fits these views, nothing is drawn.
+        if (input.Cascades is not { } cascades)
+            return null;
+
         GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
             frame.Fail(RenderFailure.Shader, "Shadows are not drawn", "a shader of the shadow maps was not built.");
@@ -204,7 +208,6 @@ public sealed class Renderer
             return null;
 
         GpuView view = input.View;
-        CascadeViews cascades = input.Cascades;
         Result<GpuTexture> atlas = _gpu.GetTexture(
             new(
                 "Cascade atlas",
@@ -250,6 +253,10 @@ public sealed class Renderer
     /// </summary>
     public LocalShadowDepth? Render(in RenderFrame frame, RenderGraph graph, in LocalDepthInput input)
     {
+        // Without the gem that fits these views, nothing is drawn.
+        if (input.Views is not { } views)
+            return null;
+
         GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
             frame.Fail(RenderFailure.Shader, "Shadows are not drawn", "a shader of the shadow maps was not built.");
@@ -258,7 +265,6 @@ public sealed class Renderer
             return null;
 
         GpuWorld world = input.World;
-        LocalShadowViews views = input.Views;
         ShadowTarget cache = new()
         {
             Names = _cacheNames,
@@ -303,6 +309,10 @@ public sealed class Renderer
     /// </summary>
     public SkyDepth? Render(in RenderFrame frame, RenderGraph graph, in SkyDepthInput input)
     {
+        // Without the gem that fits these views, nothing is drawn.
+        if (input.Views is not { } views)
+            return null;
+
         GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
             frame.Fail(
@@ -315,7 +325,6 @@ public sealed class Renderer
             return null;
 
         GpuWorld world = input.World;
-        SkyViews views = input.Views;
         ShadowTarget near = new()
         {
             Names = _nearSkyNames,
