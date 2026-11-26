@@ -514,7 +514,7 @@ A command that runs Magic waits for a free run slot first, and its limit must ho
 ### Debug views and switches
 
 `DeferredRendering.RenderView` shows one part of a frame: `Final`, `Albedo`, `Normal`, `Depth`, `Roughness`, `Metalness`,
-`Occlusion`, `Velocity`, `IndirectDiffuse` and `Reflections`. `DeferredRendering.DepthViewFar` sets the distance at
+`Occlusion`, `Velocity`, `IndirectDiffuse`, `Reflections` and `CascadeAtlas`. `DeferredRendering.DepthViewFar` sets the distance at
 which the `Depth` view turns black. A setting's key starts with the category of its own member, or with the category of its
 settings class when the member names none.
 
@@ -524,6 +524,7 @@ These values turn off one term of the light, to measure each one alone. Set each
 | Value | What it turns off |
 | --- | --- |
 | `Rendering.IsTracedShadowsOn` | The sun's traced shadows |
+| `Rendering.IsShadowMapsOn` | The shadow maps' shadows |
 | `Rendering.IsIndirectLightOn` | The light that bounces |
 | `Rendering.IsReflectionsOn` | The traced reflections |
 | `GlobalIllumination.IsHitProbeLightOn` | The probes' light at a diffuse ray's hit |

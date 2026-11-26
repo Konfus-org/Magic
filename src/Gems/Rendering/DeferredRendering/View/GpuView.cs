@@ -151,6 +151,12 @@ public readonly record struct GpuView
     public required int LightCount { get; init; }
 
     /// <summary>
+    /// The unit direction towards the light that lights the frame: the sun, the moon, or the first directional light
+    /// (<see cref="Renderer.GetSun"/>).
+    /// </summary>
+    public required Vector3 SunDirection { get; init; }
+
+    /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU.
     /// </summary>
     /// <remarks>

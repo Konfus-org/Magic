@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs;
@@ -23,6 +24,12 @@ public readonly record struct ClusterPoolsInput(GpuWorld? World);
 public readonly record struct ClusteredGeometryInput(GpuView? View, ClusterPools Pools);
 
 /// <summary>
+/// What the cluster renderer takes to draw the sun's shadow maps of a view: the view, the pools the frame's models are
+/// clustered in, and the view's cascades.
+/// </summary>
+public readonly record struct CascadeDepthInput(GpuView View, ClusterPools Pools, CascadeViews Cascades);
+
+/// <summary>
 /// Draws every model that the world holds as a hierarchy of clusters, GPU-driven, and far away as its impostor.
 /// </summary>
 /// <remarks>
@@ -36,6 +43,7 @@ public sealed class Renderer
     : Disposable,
         IRender<ClusterPoolsInput, ClusterPools>,
         IRenderFrom<ClusteredGeometryInput>,
+        IRender<CascadeDepthInput, CascadeDepth>,
         IHookIntoDomainLoading
 {
     /// <summary>
@@ -47,6 +55,7 @@ public sealed class Renderer
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
     private readonly ClusterPasses _passes;
+    private readonly ShadowPasses _shadowPasses;
 
     /// <summary>
     /// How many domains have loaded since the start. Render thread.
@@ -69,6 +78,7 @@ public sealed class Renderer
         Track(_preprocessing);
         _resources = new ClusterResources(clusters, assets, threads, gpu);
         _passes = new ClusterPasses(assets, gpu);
+        _shadowPasses = new ShadowPasses(assets, gpu);
     }
 
     /// <summary>
@@ -135,6 +145,28 @@ public sealed class Renderer
         Result recorded = _passes.Record(frame, graph, gpu, input.Pools, _settings);
         if (!recorded.Ok)
             Fail(frame, RenderFailure.Resource, recorded.Error);
+    }
+
+    /// <summary>
+    /// Draws the depth of each cascade of the view of this turn into the view's cascade atlas, in the geometry stage;
+    /// none while the shadow shaders build or after what they draw into was not made.
+    /// </summary>
+    public CascadeDepth? Render(in RenderFrame frame, RenderGraph graph, in CascadeDepthInput input)
+    {
+        GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
+        if (shaders == GpuState.Failed)
+            frame.Fail(RenderFailure.Shader, "Shadows are not drawn", "a shader of the shadow maps was not built.");
+
+        if (shaders != GpuState.Ready)
+            return null;
+
+        Result<CascadeDepth> drawn = _shadowPasses.Record(frame, graph, input.View, input.Pools, input.Cascades);
+        if (drawn.Ok)
+            return drawn.Value;
+
+        frame.Fail(RenderFailure.Resource, "Shadows are not drawn", drawn.Error);
+
+        return null;
     }
 
     /// <summary>

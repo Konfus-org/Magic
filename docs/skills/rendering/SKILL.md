@@ -196,7 +196,9 @@ takes the rule with it.
 - A ray that lands on a back face is blocked. It carries no light ([Light leak](FAULTS.md#light-leak)).
 - Light and shadow must not read only the screen. Ambient occlusion from the screen is allowed on the indirect light
   alone, within about 1 m, with a fade at the screen's edges
-  ([Light that ignores what is off screen](FAULTS.md#light-that-ignores-what-is-off-screen)).
+  ([Light that ignores what is off screen](FAULTS.md#light-that-ignores-what-is-off-screen)). A contact shadow is
+  the other exception: a march of at most a few tens of centimetres through the depth buffer towards the light, which
+  only multiplies a shadow map's result and fades at the screen's edges.
 
 ### Time
 

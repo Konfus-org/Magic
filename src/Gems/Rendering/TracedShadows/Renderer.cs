@@ -404,7 +404,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
                 .DispatchOver(view.Width, view.Height);
         }
 
-        return new ShadowMask(mask.Value, sunTint.Value);
+        return new ShadowMask(mask.Value, sunTint.Value, GpuTexture.None, GpuTexture.None);
 
         Result<GpuTexture> GetTracedTexture(string name, GpuFormat format) =>
             _gpu.GetTexture(new(name, width, height, format), viewIndex);

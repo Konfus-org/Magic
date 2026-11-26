@@ -13,7 +13,14 @@ namespace Magic.DeferredRendering.View;
 /// <summary>
 /// A frame's light table, holding <paramref name="Count"/> lights.
 /// </summary>
-internal readonly record struct LightBuffers(GpuBuffer Table, int Count);
+internal readonly record struct LightBuffers(GpuBuffer Table, int Count)
+{
+    /// <summary>
+    /// The lights as the table holds them, and what the table does not: each light's entity and whether it casts a
+    /// shadow.
+    /// </summary>
+    internal LocalLights Local { get; init; }
+}
 
 /// <summary>
 /// Fills the light table and the tiles of the screen each light reaches.
@@ -40,6 +47,11 @@ internal sealed class LightTiles(AssetManager assets, IGraphicsApi gpu)
     /// The frame's lights as the table holds them, written from the snapshots before they upload.
     /// </summary>
     private readonly GpuLight[] _lights = new GpuLight[MaxLights];
+
+    /// <summary>
+    /// Each row's light's entity and whether it is shadowless.
+    /// </summary>
+    private readonly LocalLightInfo[] _info = new LocalLightInfo[MaxLights];
 
     private readonly ShaderEntry _cullShader = PassShaders.GetEntry(assets, "CullLights", "CullLights");
 
@@ -71,7 +83,10 @@ internal sealed class LightTiles(AssetManager assets, IGraphicsApi gpu)
             return Result.Failure(table.Error);
 
         int total = points.Count + spots.Count + rects.Count;
-        LightBuffers lights = new(table.Value, Math.Min(total, MaxLights));
+        LightBuffers lights = new(table.Value, Math.Min(total, MaxLights))
+        {
+            Local = new LocalLights(table.Value, ReadOnlyMemory<GpuLight>.Empty, ReadOnlyMemory<LocalLightInfo>.Empty),
+        };
         if (total > MaxLights && _lastTotal <= MaxLights)
             Log.Error($"Some lights are not drawn: the light table holds {MaxLights}.");
 
@@ -83,23 +98,35 @@ internal sealed class LightTiles(AssetManager assets, IGraphicsApi gpu)
         int row = 0;
         for (int i = 0; i < points.Count && row < lights.Count; i++)
         {
+            _info[row] = new LocalLightInfo(points.Entities[i], points.Second[i].IsShadowless);
             _lights[row++] = ToGpuLight(points.First[i], points.Second[i]);
         }
 
         for (int i = 0; i < spots.Count && row < lights.Count; i++)
         {
+            _info[row] = new LocalLightInfo(spots.Entities[i], spots.Second[i].IsShadowless);
             _lights[row++] = ToGpuLight(spots.First[i], spots.Second[i]);
         }
 
         for (int i = 0; i < rects.Count && row < lights.Count; i++)
         {
+            _info[row] = new LocalLightInfo(rects.Entities[i], rects.Second[i].IsShadowless);
             _lights[row++] = ToGpuLight(rects.First[i], rects.Second[i]);
         }
 
         if (!graph.Upload(lights.Table, _lights.AsSpan(0, lights.Count)))
             return Result.Failure("the light table was not staged.");
 
-        return Result.Success(lights);
+        return Result.Success(
+            lights with
+            {
+                Local = new LocalLights(
+                    lights.Table,
+                    _lights.AsMemory(0, lights.Count),
+                    _info.AsMemory(0, lights.Count)
+                ),
+            }
+        );
     }
 
     /// <summary>

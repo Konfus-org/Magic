@@ -129,19 +129,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
             Tiles = view.LightTiles.Id,
         };
 
-        // The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the
-        // last, scaled so its normal is a unit; the far plane is the third column alone, which a perspective with no
-        // far plane never rejects by.
-        Vector4 c0 = new(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
-        Vector4 c1 = new(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
-        Vector4 c2 = new(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
-        Vector4 c3 = new(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
-        constants.FrustumPlane0 = Normalize(c3 + c0);
-        constants.FrustumPlane1 = Normalize(c3 - c0);
-        constants.FrustumPlane2 = Normalize(c3 + c1);
-        constants.FrustumPlane3 = Normalize(c3 - c1);
-        constants.FrustumPlane4 = Normalize(c3 - c2);
-        constants.FrustumPlane5 = Normalize(c2);
+        SetFrustum(ref constants);
 
         // Where the view was last frame, or where it is now when no frame was drawn at this size since it was
         // forgotten, with no jitter, so a velocity is the surface's move alone.
@@ -164,6 +152,65 @@ internal sealed class FrameView(IGraphicsApi gpu)
         isSent &= graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
 
         return isSent ? Result.Success() : Result.Failure("the frame's constants were not staged.");
+    }
+
+    /// <summary>
+    /// Gets the frame's main camera as the work the views share sees it, at the size of the whole picture, and its
+    /// constants as the world's buffer holds them: no jitter, no targets, and no motion since last frame.
+    /// </summary>
+    internal static (WorldEye Eye, FrameConstants Constants) CreateEye(
+        (Transform Transform, Camera Camera) camera,
+        System.Drawing.Size picture
+    )
+    {
+        int width = Math.Max(picture.Width, 1);
+        int height = Math.Max(picture.Height, 1);
+        Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 worldToView);
+        Matrix4x4 projection = CreatePerspective(camera.Camera.FieldOfView, (float)width / height, camera.Camera.Near);
+        Matrix4x4 viewProjection = worldToView * projection;
+        Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
+        float pixelsPerRadian = height / (2 * MathF.Tan(camera.Camera.FieldOfView * MathF.PI / 360));
+        Vector4 position = new(camera.Transform.Position, 0);
+        FrameConstants constants = new()
+        {
+            View = worldToView,
+            Projection = projection,
+            ViewProjection = viewProjection,
+            InverseViewProjection = inverse,
+            CameraPosition = position,
+            PreviousViewProjection = viewProjection,
+            PreviousCameraPosition = position,
+            Width = (uint)width,
+            Height = (uint)height,
+            Near = camera.Camera.Near,
+            PixelsPerRadian = pixelsPerRadian,
+        };
+        SetFrustum(ref constants);
+
+        return (
+            new WorldEye(camera.Transform.Position, viewProjection, pixelsPerRadian, camera.Camera.Near),
+            constants
+        );
+    }
+
+    /// <summary>
+    /// Sets the frustum's planes from the constants' view-projection, for row vectors: each a column added to or taken
+    /// from the last, scaled so its normal is a unit. The far plane is the third column alone, which a perspective with
+    /// no far plane never rejects by.
+    /// </summary>
+    private static void SetFrustum(ref FrameConstants constants)
+    {
+        Matrix4x4 viewProjection = constants.ViewProjection;
+        Vector4 c0 = new(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
+        Vector4 c1 = new(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
+        Vector4 c2 = new(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
+        Vector4 c3 = new(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
+        constants.FrustumPlane0 = Normalize(c3 + c0);
+        constants.FrustumPlane1 = Normalize(c3 - c0);
+        constants.FrustumPlane2 = Normalize(c3 + c1);
+        constants.FrustumPlane3 = Normalize(c3 - c1);
+        constants.FrustumPlane4 = Normalize(c3 - c2);
+        constants.FrustumPlane5 = Normalize(c2);
     }
 
     /// <summary>

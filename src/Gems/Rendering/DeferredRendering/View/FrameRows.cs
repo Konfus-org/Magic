@@ -185,7 +185,7 @@ public record struct GpuSkyTables
 }
 
 /// <summary>
-/// The frame's shadows: the mask and the sun's tint.
+/// The frame's shadows: the mask, the sun's tint, the sun's cascade atlas and the details of the sun's shadow.
 /// </summary>
 /// <remarks>
 /// The twin of <c>Scene/Shadows.slang</c>, written once a frame into the frame's buffer after
@@ -196,11 +196,15 @@ public record struct GpuShadows
 {
     public const int Offset = GpuSkyTables.Offset + GpuSkyTables.Bytes;
 
-    public const int Bytes = 8;
+    public const int Bytes = 16;
 
     public uint Mask;
 
     public uint SunTint;
+
+    public uint CascadeAtlas;
+
+    public uint SunDetails;
 }
 
 /// <summary>

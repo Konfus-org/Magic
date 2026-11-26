@@ -28,6 +28,12 @@ flowchart LR
     Accel -- TracedWorld --> GI[GlobalIllumination]
     Accel -- TracedWorld --> Vol[WeatherFX]
     Shadows -- ShadowMask --> Shading[DeferredRendering shading]
+    View -- GpuView --> Fit[ShadowMaps fit]
+    Fit -- CascadeViews --> ShadowDepth[ClusteredGeometry shadow depth]
+    Pools -- ClusterPools --> ShadowDepth
+    ShadowDepth -- CascadeDepth --> Resolve[ShadowMaps resolve]
+    Fit -- CascadeViews --> Resolve
+    Resolve -- ShadowMask --> Shading
     GI -- IndirectLight --> Shading
     Accel -- TracedWorld --> Refl[TracedReflections]
     GI -- IndirectLight --> Refl
@@ -150,7 +156,7 @@ failures flash on the mesh of their entity ([Debugging](DEBUGGING.md)).
 
 ### Debug views
 
-`DeferredRendering.RenderView` shows one part of the GBuffer, or the indirect light, alone. `Final` shows the finished frame. The
+`DeferredRendering.RenderView` shows one part of the GBuffer, the indirect light or the sun's shadow maps alone. `Final` shows the finished frame. The
 names are in `DebugView`. With a gem that gives the debug UI, F2 opens the Rendering window. F5 and F6 step through
 the views.
 
@@ -184,6 +190,9 @@ GBuffer and glass targets of the view. List it in the `.magic` file after the re
 - When a model loads, the gem makes its clusters of up to 128 triangles and its impostor atlas once for each change
   to its file. It keeps them in the cache.
 - The GPU selects the detail of each cluster.
+- It draws the depth of the shadow maps that a shadow gem fits, each from the light. An instance casts the shadow of
+  what the camera sees of it: its clusters, or its impostor where the camera sees the impostor. A renderer that is
+  `IsShadowless` and glass cast no shadow.
 - An instance draws as its impostor when it is small on screen. Near that size, the clusters and the impostor blend,
   so nothing pops.
 - When the clusters of a frame are near the limit of the gem, the gem draws more instances as impostors and coarser
@@ -221,6 +230,22 @@ AccelerationStructures gem. The settings are in `TracedShadowsSettings`. `Render
   softer.
 - The gem traces one ray for each pixel and light, then removes the noise over frames and over the screen. The
   shadows of the tile lights stay grainy at their soft edges.
+
+## ShadowMaps
+
+Shadows each pixel from shadow maps that are drawn again each frame, so a world that changes keeps its shadows. It
+needs a geometry gem that draws shadow maps. List it in the `.magic` file in place of TracedShadows; the two cannot be
+listed together. The settings are in `ShadowMapsSettings`. `Rendering.IsShadowMapsOn` turns it off.
+
+- The sun casts shadows up to `Rendering.MaxShadowDistance` metres from the camera, in up to four cascades. Each
+  cascade is a square of the sun's view, which keeps its size and moves in whole texels, so a shadow stays still while
+  the camera turns and moves.
+- A caster between the sun and a cascade casts into it, up to a kilometre away and further.
+- A surface moves along its normal before it is tested, by `Rendering.NormalBias` texels of its cascade where the light
+  is glancing, and by half a texel where it faces the light.
+- The local lights cast no shadows yet.
+- The `CascadeAtlas` debug view shows the cascades' depth.
+- `samples/MountainCabin/MountainCabinShadowMaps.magic` opens the cabin with this gem in place of TracedShadows.
 
 ## GlobalIllumination
 

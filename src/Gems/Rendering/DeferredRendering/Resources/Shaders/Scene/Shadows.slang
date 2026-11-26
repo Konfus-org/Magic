@@ -11,14 +11,23 @@ import Scene.Lights;
 
 // Where the shadows are in the frame's buffer, right after the sky's tables, and their bytes: C#'s GpuShadows.
 public static const uint ShadowsOffset = SkyTablesOffset + SkyTablesBytes;
-public static const uint ShadowsBytes = 8u;
+public static const uint ShadowsBytes = 16u;
 
 public struct Shadows
 {
-    // The denoised mask shading reads, 0 on a GPU that traces no rays, where nothing is shadowed, and the sun's tint.
+    // The mask shading reads, 0 where nothing made one and nothing is shadowed, and the sun's tint.
     public uint mask;
     public uint sunTint;
+    // The sun's cascade atlas the mask was read from, 0 where no shadow map made it.
+    public uint cascadeAtlas;
+    // How the sun's shadow was found at each pixel, C#'s ShadowMask.SunDetails: its penumbra over the widest, its
+    // cascade and its contact shadow. 0 where no shadow map made it.
+    public uint sunDetails;
 }
+
+// The widest penumbra, in texels, that the details' penumbra is a share of: the twin of C#'s
+// ShadowMask.WidestPenumbra.
+public static const float DetailsWidestPenumbra = 32.0;
 
 public Shadows GetShadows() { return LoadFrameRow<Shadows>(ShadowsOffset); }
 

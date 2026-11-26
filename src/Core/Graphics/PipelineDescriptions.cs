@@ -27,6 +27,11 @@ public enum DepthMode : byte
     /// Nearer or as near passes, and the depth is written.
     /// </summary>
     TestAndWrite,
+
+    /// <summary>
+    /// Every fragment passes and writes its depth over what the target holds, as a copy or a clear of a rectangle does.
+    /// </summary>
+    Always,
 }
 
 /// <summary>

@@ -576,8 +576,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         // Depth is reversed, so nearer is greater.
         VkPipelineDepthStencilStateCreateInfo depth = new(
             description.Depth != DepthMode.None,
-            description.Depth == DepthMode.TestAndWrite,
-            VkCompareOp.GreaterOrEqual
+            description.Depth != DepthMode.None,
+            description.Depth == DepthMode.Always ? VkCompareOp.Always : VkCompareOp.GreaterOrEqual
         );
         VkPipelineColorBlendStateCreateInfo blend = new((uint)colorCount, blends);
         VkDynamicState* dynamicStates = stackalloc VkDynamicState[2]

@@ -13,6 +13,11 @@ internal sealed class RenderInputs
 {
     internal EcsSnapshot<Transform, Ecs.Components.Renderer> Renderers { get; } = new();
 
+    /// <summary>
+    /// The physics bodies, of which the dynamic ones mark their renderers' instances as able to move in any frame.
+    /// </summary>
+    internal EcsSnapshot<Physics> Bodies { get; } = new();
+
     internal EcsSnapshot<Transform, Camera> Cameras { get; } = new();
 
     internal EcsSnapshot<Transform, DirectionalLight> DirectionalLights { get; } = new();

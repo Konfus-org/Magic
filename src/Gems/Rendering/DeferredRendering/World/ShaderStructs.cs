@@ -8,7 +8,7 @@ using Magic.Graphics;
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
-/// An instance as the GPU reads it from the instance table, 248 bytes: the twin of <c>Scene/Instances.slang</c>'s.
+/// An instance as the GPU reads it from the instance table, 252 bytes: the twin of <c>Scene/Instances.slang</c>'s.
 /// </summary>
 /// <remarks>
 /// It is in the world; the GPU takes the camera's position off a position once transformed.
@@ -16,7 +16,7 @@ namespace Magic.DeferredRendering.World;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuInstance
 {
-    public const int Bytes = 248;
+    public const int Bytes = 252;
 
     /// <summary>
     /// The model's frame to the world, row-major, as <see cref="Matrix4x4"/> is.
@@ -54,6 +54,31 @@ public record struct GpuInstance
     /// The material table's row for each of the instance's slots.
     /// </summary>
     public GpuMaterialRows Materials;
+
+    /// <summary>
+    /// What the instance is to the light: <see cref="GpuInstanceTraits"/>.
+    /// </summary>
+    public GpuInstanceTraits Traits;
+}
+
+/// <summary>
+/// The bits of <see cref="GpuInstance.Traits"/>, the twin of <c>Scene/Instances.slang</c>'s.
+/// </summary>
+[Flags]
+public enum GpuInstanceTraits : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// It casts no shadow: its renderer is <see cref="Ecs.Components.Renderer.IsShadowless"/>.
+    /// </summary>
+    Shadowless = 1,
+
+    /// <summary>
+    /// Its entity is a <see cref="Motion.Dynamic"/> body, which can move in any frame, so a cache of
+    /// still depth leaves it out.
+    /// </summary>
+    Dynamic = 2,
 }
 
 /// <summary>
@@ -91,7 +116,7 @@ public struct GpuMaterialRows : IEquatable<GpuMaterialRows>
 /// <summary>
 /// The shape of a <see cref="GpuLight"/>, the twin of <c>Scene/Lights.slang</c>'s <c>LightType</c>.
 /// </summary>
-internal enum LightType : uint
+public enum LightType : uint
 {
     Point = 0,
     Spot = 1,
@@ -102,7 +127,7 @@ internal enum LightType : uint
 /// A light as the GPU reads it from the light table, 64 bytes: the twin of <c>Scene/Lights.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct GpuLight
+public record struct GpuLight
 {
     public const int Bytes = 64;
 

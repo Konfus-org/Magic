@@ -190,3 +190,28 @@ internal record struct GpuImpostor
     /// </summary>
     public uint UvAtlas;
 }
+
+/// <summary>
+/// What the shadow passes read beyond the frame, 28 bytes, the twin of <c>Scene/ShadowDraws.slang</c>'s.
+/// </summary>
+/// <remarks>
+/// It names the shadow views, the shadow list, the draws and their counts, in a buffer of its own that the passes'
+/// header names after the frame.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct ShadowCullConstants
+{
+    public uint Views;
+
+    public uint ViewCount;
+
+    public uint ShadowClusters;
+
+    public uint DrawArguments;
+
+    public uint Counts;
+
+    public uint MaxShadowClusters;
+
+    public uint MaxShadowDraws;
+}

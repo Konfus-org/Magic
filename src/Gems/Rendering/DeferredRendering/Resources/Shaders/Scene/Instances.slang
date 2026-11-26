@@ -1,4 +1,4 @@
-// The instance table: everything drawn this frame, C#'s GpuInstance, 248 bytes each, in the world. A position goes
+// The instance table: everything drawn this frame, C#'s GpuInstance, 252 bytes each, in the world. A position goes
 // camera-relative once transformed (Core/Frame's Relative).
 module "Scene/Instances";
 
@@ -25,7 +25,19 @@ public struct GpuInstance
     public uint movedFrame;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];
+    // What the instance is to the light, C#'s GpuInstanceTraits.
+    public uint traits;
 }
+
+// The bit of an instance's traits that says it casts no shadow.
+public static const uint InstanceShadowless = 1u;
+
+// The bit of an instance's traits that says it can move in any frame: a dynamic body.
+public static const uint InstanceDynamic = 2u;
+
+public bool IsShadowless(GpuInstance instance) { return (instance.traits & InstanceShadowless) != 0u; }
+
+public bool IsDynamic(GpuInstance instance) { return (instance.traits & InstanceDynamic) != 0u; }
 
 public GpuInstance LoadInstance(uint table, uint index)
 {

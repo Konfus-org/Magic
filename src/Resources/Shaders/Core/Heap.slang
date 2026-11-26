@@ -112,6 +112,13 @@ public struct TextureRef
         return heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].Load(int3(texel, level));
     }
 
+    // The red channel of the four texels around uv at level 0, as a bilinear sample would weigh them: x the lower left,
+    // y the lower right, z the upper right and w the upper left.
+    public float4 GatherRed(SamplerRef sampler, float2 uv)
+    {
+        return heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].GatherRed(sampler.Get(), uv);
+    }
+
     // Texels across and down at a level.
     public uint2 GetSize(uint level)
     {

@@ -152,4 +152,27 @@ public enum DebugView : uint
     /// black where nothing is traced.
     /// </summary>
     Reflections,
+
+    /// <summary>
+    /// The sun's cascade atlas stretched over the view, each cascade a quarter: nearer the sun is whiter, and black is
+    /// nothing. Black all over where no shadow map is drawn.
+    /// </summary>
+    CascadeAtlas,
+
+    /// <summary>
+    /// The cascade that shadows each pixel from the sun: red, green, blue and yellow from the nearest, darker where it
+    /// blends into the next. Black where no cascade holds it or no shadow map is drawn.
+    /// </summary>
+    ShadowCascades,
+
+    /// <summary>
+    /// The width of the sun's penumbra at each pixel, from black at one texel of its cascade to white at the widest.
+    /// Black where no shadow map is drawn.
+    /// </summary>
+    Penumbra,
+
+    /// <summary>
+    /// The sun's contact shadow alone: black where it shadows. White where no shadow map is drawn.
+    /// </summary>
+    ContactShadows,
 }

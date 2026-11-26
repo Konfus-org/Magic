@@ -15,6 +15,7 @@ import Core.Math;
 import Core.Color;
 import Core.Random;
 import Light.Indirect;
+import Scene.Shadows;
 
 // C#'s DebugView.
 enum DebugView : uint
@@ -29,6 +30,10 @@ enum DebugView : uint
     Velocity,
     IndirectDiffuse,
     Reflections,
+    CascadeAtlas,
+    ShadowCascades,
+    Penumbra,
+    ContactShadows,
 }
 
 // Set in the pass header's y, over the view, when no effects finished the picture; C#'s Renderer.NoEffects.
@@ -94,6 +99,47 @@ float3 GetLightView(FrameConstants frame, DebugView view, uint2 pixel)
     return SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, LoadNormal(frame.gbufferNormal, pixel)).rgb;
 }
 
+// The sun's cascade atlas at the pixel, stretched over the view: the reversed depth on a log scale, so the casters near
+// the far end of a cascade and those near the sun both read, whiter nearer the sun. Black where nothing was drawn.
+float3 GetCascadeAtlasView(FrameConstants frame, uint2 pixel)
+{
+    TextureRef atlas = { GetShadows().cascadeAtlas };
+    if (atlas.id == 0u)
+        return float3(0.0);
+
+    uint2 size = atlas.GetSize(0u);
+    float depth = atlas.Load(pixel * size / uint2(frame.width, frame.height), 0u).x;
+    if (depth <= 0.0)
+        return float3(0.0);
+
+    return float3(1.0 - saturate((-log2(depth) - 4.0) / 8.0));
+}
+
+// How the sun's shadow was found at the pixel, as the view asks: its cascade in a colour, its penumbra's width or its
+// contact shadow.
+float3 GetSunShadowView(FrameConstants frame, DebugView view, uint2 pixel)
+{
+    TextureRef details = { GetShadows().sunDetails };
+    if (details.id == 0u)
+        return float3(view == DebugView.ContactShadows ? 1.0 : 0.0);
+
+    float4 detail = details.Load(pixel, 0u);
+    if (view == DebugView.Penumbra)
+        return float3(detail.x);
+
+    if (view == DebugView.ContactShadows)
+        return float3(detail.z);
+
+    // The cascade's number from 1, 0 for none, and the blend into the next in the fraction.
+    float cascade = detail.y * 4.0;
+    if (cascade < 0.5)
+        return float3(0.0);
+
+    float3 colors[4] = { float3(1.0, 0.2, 0.2), float3(0.2, 1.0, 0.2), float3(0.2, 0.4, 1.0),
+        float3(1.0, 1.0, 0.2) };
+    return colors[min(uint(cascade + 0.5) - 1u, 3u)] * (1.0 - 0.5 * detail.w);
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ShowLight(uint3 thread : SV_DispatchThreadID)
@@ -127,7 +173,11 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
 
     float3 color = isPicture
         ? pow(saturate(ToSrgb(light)), 1.0 / gamma)
-        : GetSurfaceView(frame, view, depthViewFar, thread.xy);
+        : view == DebugView.CascadeAtlas
+            ? GetCascadeAtlasView(frame, thread.xy)
+            : view == DebugView.ShadowCascades || view == DebugView.Penumbra || view == DebugView.ContactShadows
+                ? GetSunShadowView(frame, view, thread.xy)
+                : GetSurfaceView(frame, view, depthViewFar, thread.xy);
 
     // Triangular noise of up to one 8-bit step, new each frame, so a smooth gradient has no bands where the output
     // rounds it to 8 bits (Lipshitz, Wannamaker and Vanderkooy, "Quantization and Dither: A Theoretical Survey",
