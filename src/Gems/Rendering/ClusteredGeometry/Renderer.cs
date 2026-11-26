@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs;
@@ -23,6 +24,24 @@ public readonly record struct ClusterPoolsInput(GpuWorld? World);
 public readonly record struct ClusteredGeometryInput(GpuView? View, ClusterPools Pools);
 
 /// <summary>
+/// What the cluster renderer takes to draw the sun's shadow maps of a view: the view, the pools the frame's models are
+/// clustered in, and the view's cascades.
+/// </summary>
+public readonly record struct CascadeDepthInput(GpuView View, ClusterPools Pools, CascadeViews? Cascades);
+
+/// <summary>
+/// What the cluster renderer takes to draw the local lights' shadow maps, once a frame: the world, the pools the
+/// frame's models are clustered in, and the lights' tiles.
+/// </summary>
+public readonly record struct LocalDepthInput(GpuWorld World, ClusterPools Pools, LocalShadowViews? Views);
+
+/// <summary>
+/// What the cluster renderer takes to draw the sky's direction maps, once a frame: the world, the pools the frame's
+/// models are clustered in, and the maps' draws.
+/// </summary>
+public readonly record struct SkyDepthInput(GpuWorld World, ClusterPools Pools, SkyViews? Views);
+
+/// <summary>
 /// Draws every model that the world holds as a hierarchy of clusters, GPU-driven, and far away as its impostor.
 /// </summary>
 /// <remarks>
@@ -36,8 +55,21 @@ public sealed class Renderer
     : Disposable,
         IRender<ClusterPoolsInput, ClusterPools>,
         IRenderFrom<ClusteredGeometryInput>,
+        IRender<CascadeDepthInput, CascadeDepth>,
+        IRender<LocalDepthInput, LocalShadowDepth>,
+        IRender<SkyDepthInput, SkyDepth>,
         IHookIntoDomainLoading
 {
+    private static readonly ShadowPassNames _cascadeNames = new("Cascade", "cascade");
+
+    private static readonly ShadowPassNames _cacheNames = new("Shadow cache", "shadow cache");
+
+    private static readonly ShadowPassNames _localNames = new("Local shadow", "local shadow");
+
+    private static readonly ShadowPassNames _nearSkyNames = new("Near sky map", "near sky map");
+
+    private static readonly ShadowPassNames _farSkyNames = new("Far sky map", "far sky map");
+
     /// <summary>
     /// When a model draws as its impostor. The game thread writes it, and the step of a view reads it.
     /// </summary>
@@ -47,6 +79,7 @@ public sealed class Renderer
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
     private readonly ClusterPasses _passes;
+    private readonly ShadowPasses _shadowPasses;
 
     /// <summary>
     /// How many domains have loaded since the start. Render thread.
@@ -69,6 +102,7 @@ public sealed class Renderer
         Track(_preprocessing);
         _resources = new ClusterResources(clusters, assets, threads, gpu);
         _passes = new ClusterPasses(assets, gpu);
+        _shadowPasses = new ShadowPasses(assets, gpu);
     }
 
     /// <summary>
@@ -99,6 +133,25 @@ public sealed class Renderer
         if (!pools.Ok)
         {
             Fail(frame, RenderFailure.Resource, pools.Error);
+
+            return null;
+        }
+
+        // The world's buffer holds the pools and the impostor handoff of the settings, for what is culled once a frame
+        // from the world's main camera.
+        ClusterConstants worldClusters = new()
+        {
+            ImpostorPixels = _settings.ImpostorPixels,
+            ImpostorDistance = _settings.ImpostorDistance,
+            Clusters = pools.Value.Clusters.Id,
+            Indices = pools.Value.Indices.Id,
+            Vertices = pools.Value.Vertices.Id,
+            Models = pools.Value.Models.Id,
+            Impostors = pools.Value.Impostors.Id,
+        };
+        if (!graph.Upload(world.Frame, [worldClusters], ClusterConstants.Offset))
+        {
+            Fail(frame, RenderFailure.Resource, "the world's cluster constants were not staged.");
 
             return null;
         }
@@ -135,6 +188,179 @@ public sealed class Renderer
         Result recorded = _passes.Record(frame, graph, gpu, input.Pools, _settings);
         if (!recorded.Ok)
             Fail(frame, RenderFailure.Resource, recorded.Error);
+    }
+
+    /// <summary>
+    /// Draws the depth of each cascade of the view of this turn into the view's cascade atlas, in the geometry stage;
+    /// none while the shadow shaders build or after what they draw into was not made.
+    /// </summary>
+    public CascadeDepth? Render(in RenderFrame frame, RenderGraph graph, in CascadeDepthInput input)
+    {
+        // Without the gem that fits these views, nothing is drawn.
+        if (input.Cascades is not { } cascades)
+            return null;
+
+        GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
+        if (shaders == GpuState.Failed)
+            frame.Fail(RenderFailure.Shader, "Shadows are not drawn", "a shader of the shadow maps was not built.");
+
+        if (shaders != GpuState.Ready)
+            return null;
+
+        GpuView view = input.View;
+        Result<GpuTexture> atlas = _gpu.GetTexture(
+            new(
+                "Cascade atlas",
+                cascades.AtlasSize,
+                cascades.AtlasSize,
+                GpuFormat.D32Sfloat,
+                TextureUsages.DepthTarget | TextureUsages.Sampled
+            ),
+            frame.View
+        );
+        Result drawn = atlas.Ok
+            ? _shadowPasses.Record(
+                graph,
+                new ShadowTarget
+                {
+                    Names = _cascadeNames,
+                    Frame = view.Frame,
+                    View = frame.View,
+                    Views = cascades.Views,
+                    ViewCount = cascades.Count,
+                    Instances = view.Instances,
+                    InstanceCount = view.InstanceCount,
+                    Materials = view.Materials,
+                    Vertices = view.Vertices,
+                    Atlas = atlas.Value,
+                    IsCleared = true,
+                },
+                input.Pools
+            )
+            : Result.Failure(atlas.Error);
+        if (drawn.Ok)
+            return new CascadeDepth(atlas.Value);
+
+        frame.Fail(RenderFailure.Resource, "Shadows are not drawn", drawn.Error);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Draws the still casters of the local lights' tiles that the cache draws again into the cache, then each tile's
+    /// casters into the local atlas over the copies of the cache, once a frame in the geometry stage; none while the
+    /// shadow shaders build or after what they draw into was not made.
+    /// </summary>
+    public LocalShadowDepth? Render(in RenderFrame frame, RenderGraph graph, in LocalDepthInput input)
+    {
+        // Without the gem that fits these views, nothing is drawn.
+        if (input.Views is not { } views)
+            return null;
+
+        GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
+        if (shaders == GpuState.Failed)
+            frame.Fail(RenderFailure.Shader, "Shadows are not drawn", "a shader of the shadow maps was not built.");
+
+        if (shaders != GpuState.Ready)
+            return null;
+
+        GpuWorld world = input.World;
+        ShadowTarget cache = new()
+        {
+            Names = _cacheNames,
+            Frame = world.Frame,
+            View = null,
+            Views = views.CacheViews,
+            ViewCount = views.CacheCount,
+            Instances = world.Instances,
+            InstanceCount = world.InstanceCount,
+            Materials = world.Materials,
+            Vertices = world.Vertices,
+            Atlas = views.Cache,
+            IsCleared = false,
+        };
+        Result drawn = views.CacheCount > 0 ? _shadowPasses.Record(graph, cache, input.Pools) : Result.Success();
+        if (drawn.Ok && views.AtlasCount > 0)
+        {
+            drawn = _shadowPasses.Record(
+                graph,
+                cache with
+                {
+                    Names = _localNames,
+                    Views = views.AtlasViews,
+                    ViewCount = views.AtlasCount,
+                    Atlas = views.Atlas,
+                },
+                input.Pools
+            );
+        }
+
+        if (drawn.Ok)
+            return new LocalShadowDepth(views.Atlas);
+
+        frame.Fail(RenderFailure.Resource, "Shadows are not drawn", drawn.Error);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Draws the still casters of this frame's draws of the sky's direction maps into their atlases, once a frame in the
+    /// geometry stage; none while the shadow shaders build or after what they draw into was not made.
+    /// </summary>
+    public SkyDepth? Render(in RenderFrame frame, RenderGraph graph, in SkyDepthInput input)
+    {
+        // Without the gem that fits these views, nothing is drawn.
+        if (input.Views is not { } views)
+            return null;
+
+        GpuState shaders = _gpu.GetState(_shadowPasses.Shaders.AsSpan());
+        if (shaders == GpuState.Failed)
+            frame.Fail(
+                RenderFailure.Shader,
+                "The sky's maps are not drawn",
+                "a shader of the shadow maps was not built."
+            );
+
+        if (shaders != GpuState.Ready)
+            return null;
+
+        GpuWorld world = input.World;
+        ShadowTarget near = new()
+        {
+            Names = _nearSkyNames,
+            Frame = world.Frame,
+            View = null,
+            Views = views.NearDraws,
+            ViewCount = views.NearDrawCount,
+            Instances = world.Instances,
+            InstanceCount = world.InstanceCount,
+            Materials = world.Materials,
+            Vertices = world.Vertices,
+            Atlas = views.NearAtlas,
+            IsCleared = false,
+        };
+        Result drawn = views.NearDrawCount > 0 ? _shadowPasses.Record(graph, near, input.Pools) : Result.Success();
+        if (drawn.Ok && views.FarDrawCount > 0)
+        {
+            drawn = _shadowPasses.Record(
+                graph,
+                near with
+                {
+                    Names = _farSkyNames,
+                    Views = views.FarDraws,
+                    ViewCount = views.FarDrawCount,
+                    Atlas = views.FarAtlas,
+                },
+                input.Pools
+            );
+        }
+
+        if (drawn.Ok)
+            return new SkyDepth(views.NearAtlas, views.FarAtlas);
+
+        frame.Fail(RenderFailure.Resource, "The sky's maps are not drawn", drawn.Error);
+
+        return null;
     }
 
     /// <summary>

@@ -391,7 +391,7 @@ shaders and the structs that they share with C# are in [Shader Standards](../SHA
 | Host | C#. Vulkan through Vortice.Vulkan. Slang through its C library, in process | [VulkanGraphics.csproj:15](../../src/Gems/VulkanGraphics/VulkanGraphics.csproj#L15), [Slang.cs:14](../../src/Gems/SlangShaderCompiler/Slang.cs#L14) |
 | Axes | Left-handed: +Y up, +X right, +Z forward. 1 unit is 1 m. Front faces are clockwise | [Transform.cs:6-10](../../src/Core/Ecs/Components/Transform.cs#L6), [VulkanResources.cs:596](../../src/Gems/VulkanGraphics/VulkanResources.cs#L596) |
 | Matrices | Row vectors (System.Numerics). Slang compiles row-major | [FrameView.cs:203](../../src/Gems/Rendering/DeferredRendering/View/FrameView.cs#L203), [ShaderCompiler.cs:650](../../src/Gems/SlangShaderCompiler/ShaderCompiler.cs#L650) |
-| Depth | Reverse-Z with no far plane: 1 at the near plane, 0 at infinity. `D32_SFLOAT`, `GREATER_OR_EQUAL`, a clear to 0 | [FrameView.cs:203-218](../../src/Gems/Rendering/DeferredRendering/View/FrameView.cs#L203), [Renderer.cs:621](../../src/Gems/Rendering/DeferredRendering/Renderer.cs#L621), [VulkanResources.cs:599-603](../../src/Gems/VulkanGraphics/VulkanResources.cs#L599), [GpuCommands.cs:158](../../src/Core/Graphics/GpuCommands.cs#L158) |
+| Depth | Reverse-Z with no far plane: 1 at the near plane, 0 at infinity. `D32_SFLOAT`, `GREATER_OR_EQUAL`, a clear to 0. One exception, which the user agreed to (D11 of the traditional renderer's plan): the sky's direction maps of LightProbes are `D16_UNORM` | [FrameView.cs:203-218](../../src/Gems/Rendering/DeferredRendering/View/FrameView.cs#L203), [Renderer.cs:621](../../src/Gems/Rendering/DeferredRendering/Renderer.cs#L621), [VulkanResources.cs:599-603](../../src/Gems/VulkanGraphics/VulkanResources.cs#L599), [GpuCommands.cs:158](../../src/Core/Graphics/GpuCommands.cs#L158) |
 | API | Vulkan 1.3 or later, with `synchronization2` and dynamic rendering. No `VkRenderPass` | [VulkanDevice.cs:478](../../src/Gems/VulkanGraphics/VulkanDevice.cs#L478), [VulkanDevice.cs:523-528](../../src/Gems/VulkanGraphics/VulkanDevice.cs#L523), [VulkanRecorder.cs:310](../../src/Gems/VulkanGraphics/VulkanRecorder.cs#L310) |
 | Barriers | A pass declares what it reads and writes. The GPU provider puts in the barriers from these uses. Never write a barrier by hand | [ComputePass.cs:9](../../src/Core/Graphics/ComputePass.cs#L9), [GpuCommands.cs:111](../../src/Core/Graphics/GpuCommands.cs#L111) |
 | Bindings | One bindless heap in set 0, and a push constant of 16 bytes. A shader reads each resource through a heap reference | [Heap.slang:18-26](../../src/Resources/Shaders/Core/Heap.slang#L18), [Pass.slang:15](../../src/Resources/Shaders/Core/Pass.slang#L15), [GpuCommands.cs:191](../../src/Core/Graphics/GpuCommands.cs#L191) |
@@ -514,7 +514,8 @@ A command that runs Magic waits for a free run slot first, and its limit must ho
 ### Debug views and switches
 
 `DeferredRendering.RenderView` shows one part of a frame: `Final`, `Albedo`, `Normal`, `Depth`, `Roughness`, `Metalness`,
-`Occlusion`, `Velocity`, `IndirectDiffuse` and `Reflections`. `DeferredRendering.DepthViewFar` sets the distance at
+`Occlusion`, `Velocity`, `IndirectDiffuse`, `Reflections`, `CascadeAtlas`, `ShadowCascades`, `Penumbra`,
+`ContactShadows`, `ShadowAtlas`, `AmbientOcclusion` and `SkyVisibility`. `DeferredRendering.DepthViewFar` sets the distance at
 which the `Depth` view turns black. A setting's key starts with the category of its own member, or with the category of its
 settings class when the member names none.
 
@@ -524,9 +525,11 @@ These values turn off one term of the light, to measure each one alone. Set each
 | Value | What it turns off |
 | --- | --- |
 | `Rendering.IsTracedShadowsOn` | The sun's traced shadows |
+| `Rendering.IsShadowMapsOn` | The shadow maps' shadows |
+| `Rendering.IsContactShadowsOn` | The sun's contact shadow |
+| `Rendering.IsAmbientOcclusionOn` | The ambient occlusion |
+| `Rendering.IsSkyVisibilityOn` | The sky visibility: off, every surface sees the whole sky |
 | `Rendering.IsIndirectLightOn` | The light that bounces |
 | `Rendering.IsReflectionsOn` | The traced reflections |
 | `GlobalIllumination.IsHitProbeLightOn` | The probes' light at a diffuse ray's hit |
 | `GlobalIllumination.IsDiffuseSkyOn` | The sky on a diffuse ray that reaches nothing |
-| `GlobalIllumination.IsShadowFillOn` | The fill that a shadowed surface gets |
-| `GlobalIllumination.IsPixelProbeLightOn` | The probes' light where the traced light does not cover a pixel |

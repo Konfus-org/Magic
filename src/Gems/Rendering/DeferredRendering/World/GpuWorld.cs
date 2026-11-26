@@ -8,7 +8,7 @@ namespace Magic.DeferredRendering.World;
 /// <summary>
 /// The world as the GPU holds it this frame, whatever view it is seen through: what the world's step makes once a frame
 /// for the view's step and for the gems that keep something for the whole world. Its buffer is laid out as a view's
-/// frame buffer is, and holds the models' row alone.
+/// frame buffer is, and holds the constants of <see cref="Eye"/> and the models' row.
 /// </summary>
 public readonly record struct GpuWorld
 {
@@ -68,6 +68,16 @@ public readonly record struct GpuWorld
     public required int PreparedDomains { get; init; }
 
     /// <summary>
+    /// The frame's local lights, which every view shares.
+    /// </summary>
+    public LocalLights LocalLights => Lights.Local;
+
+    /// <summary>
+    /// The camera that what the views share is seen from.
+    /// </summary>
+    public WorldEye Eye { get; init; }
+
+    /// <summary>
     /// The models' row of a frame buffer: the pools and tables the instances are drawn from.
     /// </summary>
     internal GpuModels ModelsRow =>
@@ -105,3 +115,34 @@ public readonly record struct GpuWorld
 /// it is read back into.
 /// </summary>
 internal readonly record struct Screenshot(string Path, GpuTexture Copy, GpuBuffer Readback);
+
+/// <summary>
+/// The frame's local lights: the light table, and its rows as the CPU wrote them with what the table does not hold,
+/// at the same indexes. Read it on the render thread in the frame it is made for.
+/// </summary>
+public readonly record struct LocalLights(
+    GpuBuffer Table,
+    ReadOnlyMemory<GpuLight> Rows,
+    ReadOnlyMemory<LocalLightInfo> Info
+);
+
+/// <summary>
+/// What a light of the light table is beyond its row: its entity, which stays the same from frame to frame, and whether
+/// it casts no shadow.
+/// </summary>
+public readonly record struct LocalLightInfo(Ecs.Entity Entity, bool IsShadowless);
+
+/// <summary>
+/// The camera that the frame's shared work is seen from, once a frame for every view: the frame's main view, the first
+/// that draws into the window. Positions on the GPU that the views share are relative to its position.
+/// </summary>
+/// <remarks>
+/// The world's buffer holds it as a <see cref="FrameConstants"/> at offset 0, with its position, view,
+/// projection, frustum and pixels per radian, and no targets.
+/// </remarks>
+public readonly record struct WorldEye(
+    System.Numerics.Vector3 Position,
+    System.Numerics.Matrix4x4 ViewProjection,
+    float PixelsPerRadian,
+    float Near
+);

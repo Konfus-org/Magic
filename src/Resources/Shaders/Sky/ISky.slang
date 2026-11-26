@@ -36,6 +36,9 @@ public interface ISky
 
     // The sky's irradiance on a surface facing a direction.
     static float3 GetAmbient(SkyInputs inputs, float3 normal);
+
+    // The share of the light that reaches it that the ground below the horizon reflects.
+    static float3 GetGroundAlbedo();
 }
 
 // The sky where no sky made its tables: an even light that the sun's brightness scales, brighter towards the top of
@@ -55,5 +58,11 @@ public struct OpenSky : ISky
     public static float3 GetAmbient(SkyInputs inputs, float3 normal)
     {
         return inputs.sunIlluminance * 0.1 * (0.5 + 0.5 * normal.y);
+    }
+
+    // As the procedural sky's ground.
+    public static float3 GetGroundAlbedo()
+    {
+        return float3(0.3);
     }
 }

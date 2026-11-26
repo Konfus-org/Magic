@@ -51,3 +51,12 @@ public float2 GetBlueNoise(uint noise, uint2 pixel, uint frame, uint sample)
     float2 tile = float2(values[first.y * BlueNoiseSize + first.x], values[second.y * BlueNoiseSize + second.x]);
     return frac(tile + float(frame % 4096u) * float2(0.7548776662, 0.5698402910));
 }
+
+// A number in [0, 1) for a pixel that changes smoothly in no direction, so a pattern rotated by it has no visible
+// structure, moved by 5.588238 pixels each frame so a pixel's frames differ and temporal anti-aliasing averages them
+// (Jimenez, "Next Generation Post Processing in Call of Duty: Advanced Warfare", SIGGRAPH 2014).
+public float GetInterleavedGradientNoise(uint2 pixel, uint frame)
+{
+    float2 position = float2(pixel) + 5.588238 * float(frame % 64u);
+    return frac(52.9829189 * frac(dot(position, float2(0.06711056, 0.00583715))));
+}

@@ -110,6 +110,19 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     private long _version;
 
     /// <summary>
+    /// The entities that are dynamic bodies, as the last fill read them.
+    /// </summary>
+    private readonly HashSet<Entity> _dynamic = [];
+
+    /// <summary>
+    /// The instances whose place, model or traits the last fill changed, appeared or went: the first
+    /// <see cref="_changedCount"/>.
+    /// </summary>
+    private ChangedInstance[] _changed = new ChangedInstance[MinCapacity];
+
+    private int _changedCount;
+
+    /// <summary>
     /// How many rows the cull walks: the renderers of the last fill, up to <see cref="MaxCapacity"/>.
     /// </summary>
     internal int Count { get; private set; }
@@ -124,7 +137,10 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// rows have changed.
     /// </summary>
     internal GpuInstances Instances =>
-        new(_rows.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version);
+        new(_rows.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version)
+        {
+            Changed = _changed.AsMemory(0, _changedCount),
+        };
 
     /// <summary>
     /// Frees the failure table's rows of asset <paramref name="id"/>, read again, so a failure of it still there is
@@ -158,12 +174,25 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
     /// Each row holds its model's place in the pools and the material rows of its slots, or is empty while its model is
     /// being made.
     /// </remarks>
-    internal void Fill(EcsSnapshot<Transform, Ecs.Components.Renderer> renderers, uint frameIndex)
+    internal void Fill(
+        EcsSnapshot<Transform, Ecs.Components.Renderer> renderers,
+        EcsSnapshot<Physics> bodies,
+        uint frameIndex
+    )
     {
-        // The same snapshot again, with the same models, makes the same rows.
+        // The same snapshot again, with the same models, makes the same rows, and changes nothing.
+        _changedCount = 0;
         bool isRebuild = resources.SettledModels != _settledModels;
         if (renderers.Version == _filledAt && !isRebuild)
             return;
+
+        // A body's motion is on its entity, whose chunk of renderers a change of it writes.
+        _dynamic.Clear();
+        for (int i = 0; i < bodies.Count; i++)
+        {
+            if (bodies.First[i].Motion == Motion.Dynamic)
+                _dynamic.Add(bodies.Entities[i]);
+        }
 
         // The error shows each time the table fills, not each fill while it is full.
         int lastCount = Count;
@@ -173,6 +202,13 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
         Count = Math.Min(renderers.Count, MaxCapacity);
         if (Count != lastCount)
             _version++;
+
+        // The rows past the new end went, with the bounds they had.
+        for (int index = Count; index < lastCount; index++)
+        {
+            if (_rows[index].Model != 0)
+                AddChanged(_rows[index], default);
+        }
 
         // The table grows as the world does, the rows it has kept as they are.
         if (Count > _rows.Length)
@@ -354,6 +390,9 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
                     BoundsCenter = Vector3.Transform(model.BoundsCenter, worldMatrix),
                     BoundsRadius = model.BoundsRadius * maxScale,
                     Model = model.ModelIndex,
+                    Traits =
+                        (renderer.IsShadowless ? GpuInstanceTraits.Shadowless : GpuInstanceTraits.None)
+                        | (_dynamic.Contains(entity) ? GpuInstanceTraits.Dynamic : GpuInstanceTraits.None),
                 };
                 ImmutableArray<MaterialInstance> slots = renderer.Materials.All;
                 for (int slot = 0; slot < MaterialSet.Capacity; slot++)
@@ -375,6 +414,20 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
                 row.MovedFrame = frameIndex;
             }
 
+            // What a cache of the world's depth must draw again: a row whose bounds, model or traits are not as they
+            // were.
+            GpuInstance old = index < lastCount ? _rows[index] : default;
+            if (
+                old.Model != row.Model
+                || old.Traits != row.Traits
+                || old.BoundsCenter != row.BoundsCenter
+                || old.BoundsRadius != row.BoundsRadius
+                || old.World != row.World
+            )
+            {
+                AddChanged(old, row);
+            }
+
             _rows[index] = row;
             _entities[index] = entity;
         }
@@ -385,6 +438,24 @@ internal sealed class InstanceTable(AssetManager assets, IGraphicsApi gpu, GpuRe
         }
 
         _version++;
+    }
+
+    /// <summary>
+    /// Adds a row that went from <paramref name="old"/> to <paramref name="row"/> to the change list; an empty row has no
+    /// bounds.
+    /// </summary>
+    private void AddChanged(in GpuInstance old, in GpuInstance row)
+    {
+        if (_changedCount == _changed.Length)
+            Array.Resize(ref _changed, _changed.Length * 2);
+
+        _changed[_changedCount++] = new ChangedInstance(
+            old.BoundsCenter,
+            old.Model == 0 ? 0 : old.BoundsRadius,
+            row.BoundsCenter,
+            row.Model == 0 ? 0 : row.BoundsRadius,
+            (old.Traits | row.Traits) & GpuInstanceTraits.Dynamic
+        );
     }
 
     /// <summary>
@@ -479,4 +550,23 @@ public readonly record struct GpuInstances(
     int MaterialCount,
     int MaterialCapacity,
     long Version
+)
+{
+    /// <summary>
+    /// Each instance that moved, appeared, went, or changed its model or traits this frame, with its bounds before and
+    /// after.
+    /// </summary>
+    public ReadOnlyMemory<ChangedInstance> Changed { get; init; }
+}
+
+/// <summary>
+/// An instance that changed this frame: its bounds in the world before and after, a radius of 0 where it was not or is
+/// not drawn, and <see cref="GpuInstanceTraits.Dynamic"/> where it was or is a dynamic body.
+/// </summary>
+public readonly record struct ChangedInstance(
+    Vector3 OldCenter,
+    float OldRadius,
+    Vector3 NewCenter,
+    float NewRadius,
+    GpuInstanceTraits Dynamic
 );

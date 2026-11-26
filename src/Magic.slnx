@@ -23,11 +23,14 @@
     <Project Path="Gems/DebugTools/DebugTools.csproj" />
     <Project Path="Gems/CSharpScripting/CSharpScripting.csproj" />
     <Project Path="Gems/Rendering/AccelerationStructures/AccelerationStructures.csproj" />
+    <Project Path="Gems/Rendering/AmbientOcclusion/AmbientOcclusion.csproj" />
     <Project Path="Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj" />
     <Project Path="Gems/Rendering/DeferredRendering/DeferredRendering.csproj" />
     <Project Path="Gems/Rendering/GlobalIllumination/GlobalIllumination.csproj" />
+    <Project Path="Gems/Rendering/LightProbes/LightProbes.csproj" />
     <Project Path="Gems/Rendering/PostEffects/PostEffects.csproj" />
     <Project Path="Gems/Rendering/ProceduralSky/ProceduralSky.csproj" />
+    <Project Path="Gems/Rendering/ShadowMaps/ShadowMaps.csproj" />
     <Project Path="Gems/Rendering/TaaUpscaling/TaaUpscaling.csproj" />
     <Project Path="Gems/Rendering/TracedReflections/TracedReflections.csproj" />
     <Project Path="Gems/Rendering/TracedShadows/TracedShadows.csproj" />

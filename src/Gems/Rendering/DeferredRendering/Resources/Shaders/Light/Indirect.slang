@@ -1,8 +1,8 @@
 // The light that reaches the view's surfaces indirectly, as whatever traces it leaves it for a frame: the diffuse light
 // and the reflections at a part of the picture's size, and the probe grid around them, and how the picture reads them
 // back at its own size, blurred where they are still noisy, which anything traced at a part of the picture's size can
-// read its own back with, and how much of it the depth's nearby surfaces hide. It is a row of the frame's buffer, C#'s
-// GpuIndirectLight, every id 0 where nothing traced it this frame, and the surfaces are lit with the sky.
+// read its own back with. It is a row of the frame's buffer, C#'s GpuIndirectLight, every id 0 where nothing traced it
+// this frame, and the surfaces are lit with the sky.
 module "Light/Indirect";
 
 import Core.Heap;
@@ -12,9 +12,11 @@ import Core.Math;
 import Core.Random;
 import Light.Probes;
 import Scene.Shadows;
+import Light.Ambient;
 
-// Where the indirect light is in the frame's buffer, right after the shadows, and its bytes: C#'s GpuIndirectLight.
-public static const uint IndirectLightOffset = ShadowsOffset + ShadowsBytes;
+// Where the indirect light is in the frame's buffer, right after the ambient terms, and its bytes: C#'s
+// GpuIndirectLight.
+public static const uint IndirectLightOffset = AmbientOffset + AmbientBytes;
 public static const uint IndirectLightBytes = 56u;
 
 // What the diffuse light is multiplied by before NRD denoises it, and divided by where shading reads it back: NRD keeps
@@ -286,65 +288,4 @@ public float4 SampleIndirectReflections(
     TextureRef texture = { light };
     float radius = 2.0 * saturate(roughness * 8.0);
     return SampleTraced(frame, texture, pixel, relative, normal, radius, TracedRoughness);
-}
-
-// How far in metres the occlusion of the indirect light looks around a surface, and the most pixels it reaches.
-static const float OcclusionRadius = 0.25;
-static const float OcclusionMaxPixels = 48.0;
-
-// The slices across the picture the occlusion looks along, and its taps on each side of a slice.
-static const uint OcclusionSlices = 2u;
-static const uint OcclusionTaps = 3u;
-
-// How high a neighbour must rise above a surface's plane, as the sine of its angle, before it hides any light, so the
-// depth's error and a normal map don't darken a flat surface.
-static const float OcclusionBias = 0.1;
-
-// How much of the indirect light reaches a pixel of the picture whose surface is at a camera-relative point facing a
-// unit normal, from 0 to 1. Along a few slices across the picture, turned at random each frame for the TAA to blend,
-// the highest neighbour in the depth on each side of a slice hides 1 - cos of its rise of the surface's
-// cosine-weighted hemisphere, less as it lies further off, and none past OcclusionRadius, so a far surface behind an
-// object is not darkened around it (Jimenez et al., "Practical Real-Time Strategies for Accurate Indirect Occlusion",
-// 2016).
-public float GetIndirectOcclusion(FrameConstants frame, uint2 pixel, float3 relative, float3 normal)
-{
-    float pixels =
-        OcclusionRadius * frame.projection[1][1] * 0.5 * float(frame.height) / max(length(relative), Epsilon);
-    if (pixels < 1.0)
-        return 1.0;
-
-    TextureRef depthTexture = { frame.depth };
-    int2 size = int2(frame.width, frame.height);
-    float3 xi = GetRandom(pixel, frame.frameIndex, 0u);
-    float hidden = 0.0;
-    for (uint slice = 0u; slice < OcclusionSlices; slice++)
-    {
-        float angle = (float(slice) + xi.x) * Pi / float(OcclusionSlices);
-        float2 direction = float2(cos(angle), sin(angle));
-        for (uint side = 0u; side < 2u; side++)
-        {
-            float rise = 0.0;
-            for (uint tap = 0u; tap < OcclusionTaps; tap++)
-            {
-                float reach = max((float(tap) + xi.y) / float(OcclusionTaps) * min(pixels, OcclusionMaxPixels), 1.0);
-                int2 at = int2(pixel) + int2(round(direction * reach));
-                if (any(at < int2(0)) || any(at >= size))
-                    break;
-
-                float depth = depthTexture.Load(uint2(at), 0u).x;
-                if (depth == 0.0)
-                    continue;
-
-                float3 gap = ReconstructPixel(frame, uint2(at), depth) - relative;
-                float apart = max(length(gap), Epsilon);
-                float sine = saturate((dot(gap, normal) / apart - OcclusionBias) / (1.0 - OcclusionBias));
-                rise = max(rise, sine * saturate(1.0 - Pow2(apart / OcclusionRadius)));
-            }
-
-            hidden += 1.0 - sqrt(1.0 - rise * rise);
-            direction = -direction;
-        }
-    }
-
-    return 1.0 - hidden / float(2u * OcclusionSlices);
 }

@@ -43,6 +43,7 @@ internal static class VulkanTranslate
             GpuFormat.R32Uint => VkFormat.R32Uint,
             GpuFormat.R32Sfloat => VkFormat.R32Sfloat,
             GpuFormat.D32Sfloat => VkFormat.D32Sfloat,
+            GpuFormat.D16Unorm => VkFormat.D16Unorm,
             GpuFormat.Bc7Unorm => VkFormat.Bc7UnormBlock,
             GpuFormat.Bc7Srgb => VkFormat.Bc7SrgbBlock,
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such format."),

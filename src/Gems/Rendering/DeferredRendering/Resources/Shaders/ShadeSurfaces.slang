@@ -16,9 +16,12 @@ import Core.Math;
 import Scene.Lights;
 import Scene.Shadows;
 import Light.Air;
+import Light.Ambient;
 import Light.Indirect;
 import Light.LocalLights;
+import Light.LocalShadows;
 import Light.Probes;
+import Core.Random;
 import Scene.Failures;
 import Sky.ISky;
 import Surface.Brdf;
@@ -36,15 +39,6 @@ static const float3 Green = float3(0.125, 0.319, 0.016);
 static const float2 CloudBand = float2(0.05, 0.35);
 
 // The texts, as character codes: "Sky failed" and "Weather failed".
-// PROTO: how much of the sun's light a shadowed surface would get unshadowed it still reflects, from every side, in
-// place of the sun's bounce off the surroundings where the indirect light gives less. A local light gets no fill: its
-// unshadowed light reaches through a wall.
-static const float ShadowFill = 0.05;
-
-// PROTO: the shares of the sky a surface sees between which the sun's fill rises from none to all of it: under the
-// first, a room that sees the sky only through a window gets none, and a wall in the open, which sees half, gets all.
-static const float2 FillSkyShare = float2(0.1, 0.4);
-
 static const uint SkyText[10] = { 83u, 107u, 121u, 32u, 102u, 97u, 105u, 108u, 101u, 100u };
 static const uint WeatherText[14] = { 87u, 101u, 97u, 116u, 104u, 101u, 114u, 32u, 102u, 97u, 105u, 108u, 101u, 100u };
 
@@ -75,49 +69,52 @@ float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
     return (isWeather ? Green : Coral) * GetFailurePulse(timeSec) * FailureColorGlow;
 }
 
-// The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface
-// reflects, its irradiance over pi: the traced light where it was traced, which sees what shades and bounces the light
-// near the surface and the probes' beyond, giving way to the probes' own where the traced pixels around it saw none,
-// such as a thin leaf against the sky, else the sky's over its hemisphere. The specular is the traced reflections
-// as far as they cover the pixel, where the surface is smooth enough for them, less as it roughens to their limit.
-// Elsewhere, where a sky entity draws the sky, it is the sky along the mirror direction, giving way to the diffuse as
-// the surface roughens. Where the diffuse is traced, or the sky is the open sky, it is the diffuse alone, so a closed
-// room reflects none of the sky. The nearby surfaces in the depth hide part of both where surfaces meet, the specular
-// as much as that occlusion hides of its lobe (Lagarde and de Rousiers, "Moving Frostbite to Physically Based
-// Rendering", 2014). The specular rises towards edge-on only where the surface is smooth enough to trace, less as it
-// roughens to that limit. The diffuse is never darker than the fill, what a white diffuse surface reflects of the
-// stand-in bounce of the sun, so a shadow in the open is never black: it gets the part of the fill its own brightness
-// lacks, so light that is bright enough keeps its colour. Where the diffuse is traced, the sun fills only where the
-// surface sees enough of the sky, so it fills no room.
+// The light a surface at a pixel reflects of what reaches it indirectly, from one source. The diffuse is what a
+// white diffuse surface reflects, its irradiance over pi: the traced light where a gem traces it; else the sky's
+// over the hemisphere around the bent normal, from its spherical harmonics, times the share of the sky the surface
+// sees, where gems make them; else the sky's own ambient. The specular is the traced reflections as far as they
+// cover the pixel, where the surface is smooth enough for them, less as it roughens to their limit. Elsewhere, it is
+// the sky's prefiltered map along the mirror direction, at the surface's roughness, times the share of the sky that
+// the reflection sees, where a gem made it; else, where a sky entity draws the sky, the sky along the mirror
+// direction, giving way to the diffuse as the surface roughens. Where the diffuse is traced, or the sky is the open
+// sky, it is the diffuse alone, so a closed room reflects none of the sky. Where a gem makes the ambient occlusion,
+// it hides part of both where surfaces meet: the diffuse after its bounces between them, and the specular as much as
+// it hides of its lobe. The specular rises towards edge-on only where the surface is smooth enough to trace, less as
+// it roughens to that limit. No floor of light is added: a place that sees no sky and no light stays dark.
 float3 ShadeIndirectLight<S : ISky>(
     FrameConstants frame,
     Lights lights,
     Brdf brdf,
     float roughness,
     uint2 pixel,
+    float depth,
     float3 relative,
     float3 normal,
-    float3 view,
-    float3 sunFill
+    float3 view
 )
 {
     IndirectLight indirect = GetIndirectLight();
     SkyTables tables = GetSkyTables();
+    AmbientTerms ambient = GetAmbientTerms();
+    float occlusion = LoadAmbientOcclusion(ambient, pixel);
+    float3 bent = LoadBentNormal(ambient, pixel, normal);
+    float2 skySeen = LoadSkyVisibility(ambient, frame, pixel, depth, normal);
     bool isTraced = indirect.diffuse != 0u;
     float3 diffuse;
     if (isTraced)
     {
         float4 traced = SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, normal);
-        float3 probes = GetProbeIrradiance(indirect.grid, relative + frame.cameraPosition.xyz, normal);
-        diffuse = (indirect.termsOff & 8u) == 0u ? lerp(probes, traced.rgb, traced.a) : traced.rgb;
-        float skyShare = SampleSkyShare(frame, indirect.skyShare, pixel, relative, normal);
-        sunFill *= smoothstep(FillSkyShare.x, FillSkyShare.y, skyShare);
+        diffuse = traced.rgb;
     }
+    else if (ambient.skyIrradiance != 0u)
+        diffuse = GetSkyIrradiance(ambient, bent) * InvPi * skySeen.x;
     else
-        diffuse = S.GetAmbient(CreateSkyInputs(lights, tables, normal, false), normal) * InvPi;
+        diffuse = S.GetAmbient(CreateSkyInputs(lights, tables, bent, false), bent) * InvPi;
 
     float3 specular = diffuse;
-    if (!isTraced && HasSky(tables))
+    if (!isTraced && ambient.skyMap != 0u)
+        specular = SampleSkyMap(ambient, reflect(-view, normal), roughness) * skySeen.y;
+    else if (!isTraced && HasSky(tables))
     {
         float3 reflected = S.Evaluate(CreateSkyInputs(lights, tables, reflect(-view, normal), false));
         specular = lerp(reflected, diffuse, saturate(roughness));
@@ -130,16 +127,14 @@ float3 ShadeIndirectLight<S : ISky>(
         specular = lerp(specular, traced.rgb, traced.a * smooth);
     }
 
-    float3 fill = (indirect.termsOff & 4u) == 0u ? sunFill : float3(0.0);
-    diffuse += fill * saturate(1.0 - GetLuminance(diffuse) / max(GetLuminance(fill), Epsilon));
-    float occlusion = GetIndirectOcclusion(frame, pixel, relative, normal);
     float facing = max(dot(normal, view), 1e-4);
-    float specularOcclusion = saturate(pow(facing + occlusion, exp2(-16.0 * roughness - 1.0)) - 1.0 + occlusion);
+    float3 diffuseOcclusion = GetMultiBounceOcclusion(occlusion, brdf.diffuse);
+    float specularOcclusion = GetSpecularOcclusion(occlusion, facing, roughness);
 
     // A surface too rough to trace reflects as one seen face-on does, with no rise of its specular towards edge-on:
     // the rise, untinted, covers the colour of a dark side seen along its face with a pale sheen.
     float3 fresnel = GetEnvironmentBrdf(brdf.f0, roughness, lerp(1.0, facing, smooth));
-    return occlusion * brdf.diffuse * (1.0 - fresnel) * diffuse + specularOcclusion * fresnel * specular;
+    return diffuseOcclusion * brdf.diffuse * (1.0 - fresnel) * diffuse + specularOcclusion * fresnel * specular;
 }
 
 [shader("compute")]
@@ -195,7 +190,10 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sunLight = sunUnshadowed * GetShadow(shadowWords, 0u) * LoadSunTint(shadows.sunTint, thread.xy);
     float3 color = Evaluate(brdf, normal, view, toSun) * sunLight;
 
-    // The lights of the pixel's tile, a word of bits at a time.
+    // The lights of the pixel's tile, a word of bits at a time, each shadowed by its contact shadow's slot of the mask
+    // and its shadow maps.
+    LocalShadowMaps localShadows = GetLocalShadowMaps();
+    float noise = GetInterleavedGradientNoise(thread.xy, frame.frameIndex);
     ArrayRef<uint> tiles = { lights.tiles };
     uint offset = GetLightTileOffset(thread.xy / LightTileSize, size.x);
     uint buckets = (min(lights.count, MaxLights) + 31u) / 32u;
@@ -207,13 +205,21 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         {
             uint bit = firstbitlow(bits);
             bits &= bits - 1u;
-            LightSample sample = SampleLight(LoadLight(lights.table, bucket * 32u + bit), world, normal);
-            color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance * GetShadow(shadowWords, slot);
+            uint index = bucket * 32u + bit;
+            GpuLight light = LoadLight(lights.table, index);
+            LightSample sample = SampleLight(light, world, normal);
+            if (any(sample.irradiance > 0.0))
+            {
+                float shadow = GetShadow(shadowWords, slot) * GetLocalShadow(
+                    localShadows, index, light, relative, frame.cameraPosition.xyz, normal, noise);
+                color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance * shadow;
+            }
+
             slot++;
         }
     }
 
     color += hdr.Load(thread.xy).rgb + surface.z * ShadeIndirectLight<S>(
-        frame, lights, brdf, surface.x, thread.xy, relative, normal, view, sunUnshadowed * ShadowFill * InvPi);
+        frame, lights, brdf, surface.x, thread.xy, depth, relative, normal, view);
     hdr.Store(thread.xy, float4(color, 1.0));
 }

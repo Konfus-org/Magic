@@ -124,5 +124,31 @@
       {"name": "corner left of the far wall", "position": {"x": -3070.82, "y": 1150.44, "z": -207.19}, "maxNits": 0.05},
       {"name": "corner right of the far wall", "position": {"x": -3068.92, "y": 1150.44, "z": -207.19}, "maxNits": 0.05}
     ]
+  },
+  {
+    "name": "cave-mouth",
+    "project": "samples/MountainCabin/MountainCabin.magic",
+    "entity": "ReferenceView.CaveMouth",
+    "hours": [12, 22],
+    "points": [
+      {"name": "floor at the mouth", "position": {"x": -3062, "y": 1150.5, "z": -204}},
+      {"name": "floor halfway in", "position": {"x": -3062, "y": 1150.5, "z": -201}},
+      {"name": "wall on -X", "position": {"x": -3063.5, "y": 1151.5, "z": -201}},
+      {"name": "wall on +X", "position": {"x": -3060.5, "y": 1151.5, "z": -201}},
+      {"name": "ceiling", "position": {"x": -3062, "y": 1153, "z": -201}}
+    ]
+  },
+  {
+    "name": "cave-deep",
+    "project": "samples/MountainCabin/MountainCabin.magic",
+    "entity": "ReferenceView.CaveDeep",
+    "hours": [12, 22],
+    "points": [
+      {"name": "floor past the turn", "position": {"x": -3056, "y": 1150.5, "z": -194.5}},
+      {"name": "end wall", "position": {"x": -3052, "y": 1151.5, "z": -194.5}},
+      {"name": "back wall", "position": {"x": -3057, "y": 1151.5, "z": -193}},
+      {"name": "near wall", "position": {"x": -3058, "y": 1151.5, "z": -196}},
+      {"name": "ceiling", "position": {"x": -3055, "y": 1153, "z": -194.5}}
+    ]
   }
 ]
