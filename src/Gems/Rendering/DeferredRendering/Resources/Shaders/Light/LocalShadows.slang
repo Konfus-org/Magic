@@ -80,14 +80,10 @@ public float GetLocalShadow(LocalShadowMaps maps, uint index, GpuLight light, fl
 
     float3 position = relative + cameraPosition - maps.anchor;
     float3 fromLight = position - (light.position - maps.anchor);
-    uint face = 0u;
-    if (shadow.faceCount > 1u)
-    {
-        float3x3 basis = GetLightBasis(light);
-        face = GetFace(mul(basis, fromLight));
-        if (face >= shadow.faceCount)
-            return 1.0;
-    }
+    float3x3 basis = GetLightBasis(light);
+    uint face = shadow.faceCount > 1u ? GetFace(mul(basis, fromLight)) : 0u;
+    if (face >= shadow.faceCount)
+        return 1.0;
 
     ArrayRef<GpuShadowTile> tiles = { maps.tiles };
     GpuShadowTile tile = tiles[shadow.firstTile + face];
@@ -102,14 +98,40 @@ public float GetLocalShadow(LocalShadowMaps maps, uint index, GpuLight light, fl
     float glancing = 1.0 - saturate(dot(normal, toLight));
     float viewDepth = mul(float4(position, 1.0), tile.viewProjection).w;
     float bias = max(maps.normalBias * glancing, LocalMinNormalBias) * texelAtMetre * viewDepth;
+    // The face is the one that the moved point lies in: near an edge of the cube, the move can take the point over
+    // into the next face, whose tile holds what is in front of it.
+    bool isCube = shadow.faceCount > 1u;
+    if (isCube)
+    {
+        uint moved = GetFace(mul(basis, fromLight + normal * bias));
+        if (moved != face)
+        {
+            if (moved >= shadow.faceCount)
+                return 1.0;
+
+            face = moved;
+            tile = tiles[shadow.firstTile + face];
+            if (tile.rect.z == 0u)
+                return 1.0;
+
+            focal = length(float3(tile.viewProjection[0][0], tile.viewProjection[1][0], tile.viewProjection[2][0]));
+            texelAtMetre = 2.0 / max(focal * float(tile.rect.z), Epsilon);
+            near = tile.viewProjection[3][2];
+        }
+    }
+
     float4 clip = mul(float4(position + normal * bias, 1.0), tile.viewProjection);
     if (clip.w <= near)
         return 1.0;
 
     float3 ndc = clip.xyz / clip.w;
     float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    if (any(uv < 0.0) || any(uv > 1.0))
+    // A spot light's tile ends where its light does. A point in a cube face is in its tile, past the rounding of a
+    // point on the edge between two faces.
+    if (!isCube && (any(uv < 0.0) || any(uv > 1.0)))
         return 1.0;
+
+    uv = saturate(uv);
 
     float2 texel = float2(tile.rect.xy) + uv * float2(tile.rect.zw);
     float receiverDepth = clip.w;
