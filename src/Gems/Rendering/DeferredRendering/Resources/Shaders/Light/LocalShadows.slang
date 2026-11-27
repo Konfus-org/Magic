@@ -31,6 +31,40 @@ uint GetFace(float3 local)
     return local.y >= 0.0 ? 3u : 4u;
 }
 
+// The most that a receiver's reversed depth changes over a texel of its tile, as a share of the depth: a surface
+// almost edge-on to the light keeps this slope, so its plane does not run off past every caster.
+static const float SteepestSlope = 0.05;
+
+// The change of a receiver's reversed depth per texel of its tile across the receiver's plane: its point and two
+// points a texel away along the plane, each put into the tile, give the depth's change along the two texel axes.
+float2 GetReceiverSlope(GpuShadowTile tile, float3 point, float3 normal, float2 texel, float depth, float step)
+{
+    float3 hint = abs(normal.y) < 0.99 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+    float3 across = normalize(cross(normal, hint));
+    float3 along = cross(normal, across);
+    float3 a = ToTileTexel(tile, point + across * step);
+    float3 b = ToTileTexel(tile, point + along * step);
+    float2x2 moved = float2x2(a.xy - texel, b.xy - texel);
+    float det = determinant(moved);
+    if (abs(det) < 1e-6)
+        return float2(0.0);
+
+    // The slope that gives each point's change of depth from its change of texels.
+    float2 change = float2(a.z - depth, b.z - depth);
+    float2x2 inverse = float2x2(moved[1][1], -moved[0][1], -moved[1][0], moved[0][0]) / det;
+    float steepest = SteepestSlope * abs(depth);
+    return clamp(mul(inverse, change), -steepest, steepest);
+}
+
+// A point, relative to the lights' anchor, as a texel of a tile of the atlas and its reversed depth.
+float3 ToTileTexel(GpuShadowTile tile, float3 point)
+{
+    float4 clip = mul(float4(point, 1.0), tile.viewProjection);
+    float3 ndc = clip.xyz / max(clip.w, Epsilon);
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    return float3(float2(tile.rect.xy) + uv * float2(tile.rect.zw), ndc.z);
+}
+
 // How much of light index's light reaches a point relative to the camera of the frame, whose camera is at
 // cameraPosition, of a surface facing normal; noise turns the filter's taps.
 public float GetLocalShadow(LocalShadowMaps maps, uint index, GpuLight light, float3 relative, float3 cameraPosition,
@@ -79,6 +113,7 @@ public float GetLocalShadow(LocalShadowMaps maps, uint index, GpuLight light, fl
 
     float2 texel = float2(tile.rect.xy) + uv * float2(tile.rect.zw);
     float receiverDepth = clip.w;
+    float2 slope = GetReceiverSlope(tile, position + normal * bias, normal, texel, ndc.z, texelAtMetre * clip.w);
     float texelHere = texelAtMetre * receiverDepth;
     float widest = max(maps.maxPenumbra, 1.0);
     ShadowMaps atlas = { maps.atlas, maps.sampler, maps.minMips, maps.maxMips, maps.mipLevels };
@@ -90,12 +125,12 @@ public float GetLocalShadow(LocalShadowMaps maps, uint index, GpuLight light, fl
         1.0,
         widest
     );
-    Blockers blockers = FindBlockers(atlas, texel, ndc.z, search, tile.rect, rotation, maps.blockerTaps);
+    Blockers blockers = FindBlockers(atlas, texel, ndc.z, slope, search, tile.rect, rotation, maps.blockerTaps);
     if (blockers.count == 0.0)
         return 1.0;
 
     float blockerDepth = near / max(blockers.depth, Epsilon);
     float penumbra = max(receiverDepth - blockerDepth, 0.0) * shadow.lightWidth / max(blockerDepth, Epsilon);
     float radius = clamp(0.5 * penumbra / max(texelHere, Epsilon), 1.0, widest);
-    return FilterShadow(atlas, texel, ndc.z, radius, tile.rect, rotation, maps.filterTaps);
+    return FilterShadow(atlas, texel, ndc.z, slope, radius, tile.rect, rotation, maps.filterTaps);
 }

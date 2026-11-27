@@ -4,7 +4,10 @@
 // filter of that width gives the share of the light that reaches the point: sharp where the caster meets the shadow
 // and softer further from it. A wide search reads a min/max mip of the map, as the GDC 2008 slides of the same method
 // propose; the PCF reads the map itself. The taps lie on a Vogel disc rotated for each pixel (Vogel, "A better way to
-// construct the sunflower head", 1979). Every depth is reversed: larger is nearer the light.
+// construct the sunflower head", 1979). Every depth is reversed: larger is nearer the light. A receiver that slants to
+// the light gives its depth's change per texel, its slope, and each tap compares against the receiver's plane there,
+// not its depth at the centre, so a wide filter on a slanted floor does not shadow the floor with itself (Isidoro,
+// "Shadow Mapping: GPU-based Tips and Techniques", GDC 2006).
 module "Light/ShadowFilter";
 
 import Core.Heap;
@@ -52,9 +55,10 @@ public struct Blockers
     public float count;
 }
 
-// The casters within radius texels of position that are nearer the light than receiver.
-public Blockers FindBlockers(ShadowMaps maps, float2 position, float receiver, float radius, uint4 rect, float rotation,
-    uint taps)
+// The casters within radius texels of position that are nearer the light than the receiver's plane, of depth receiver
+// at position and slope per texel.
+public Blockers FindBlockers(ShadowMaps maps, float2 position, float receiver, float2 slope, float radius, uint4 rect,
+    float rotation, uint taps)
 {
     float sum = 0.0;
     float found = 0.0;
@@ -70,13 +74,14 @@ public Blockers FindBlockers(ShadowMaps maps, float2 position, float receiver, f
         {
             float2 tap = KeepInRect(position + GetVogelTap(i, taps, rotation) * radius, rect, scale * 0.5);
             uint2 texel = uint2(tap / scale);
+            float here = receiver + dot(slope, tap - position);
             float nearest = maxDepths.Load(texel, mip).x;
-            if (nearest <= receiver)
+            if (nearest <= here)
                 continue;
 
             // Some of the texels under it are nearer the light: their mean lies between the nearest and the farthest
             // of them that is still nearer than the receiver.
-            float farthest = max(minDepths.Load(texel, mip).x, receiver);
+            float farthest = max(minDepths.Load(texel, mip).x, here);
             sum += 0.5 * (nearest + farthest);
             found += 1.0;
         }
@@ -90,7 +95,7 @@ public Blockers FindBlockers(ShadowMaps maps, float2 position, float receiver, f
         {
             float2 tap = KeepInRect(position + GetVogelTap(i, taps, rotation) * radius, rect, 1.0);
             float4 gathered = depths.GatherRed(sampler, round(tap) / size);
-            float4 isBlocker = select(gathered > receiver, float4(1.0), float4(0.0));
+            float4 isBlocker = select(gathered > receiver + dot(slope, tap - position), float4(1.0), float4(0.0));
             sum += dot(gathered, isBlocker);
             found += dot(isBlocker, float4(1.0));
         }
@@ -100,10 +105,11 @@ public Blockers FindBlockers(ShadowMaps maps, float2 position, float receiver, f
     return blockers;
 }
 
-// The share of the light that reaches a point whose reversed depth is receiver at position, in texels of the atlas,
-// filtered over radius texels: each tap compares the four texels around it and weighs them as a bilinear sample would.
-public float FilterShadow(ShadowMaps maps, float2 position, float receiver, float radius, uint4 rect, float rotation,
-    uint taps)
+// The share of the light that reaches a point whose reversed depth is receiver at position, in texels of the atlas, with
+// slope per texel, filtered over radius texels: each tap compares the four texels around it and weighs them as a
+// bilinear sample would.
+public float FilterShadow(ShadowMaps maps, float2 position, float receiver, float2 slope, float radius, uint4 rect,
+    float rotation, uint taps)
 {
     TextureRef depths = { maps.atlas };
     SamplerRef sampler = { maps.sampler };
@@ -116,7 +122,7 @@ public float FilterShadow(ShadowMaps maps, float2 position, float receiver, floa
         float2 corner = floor(tap - 0.5);
         float2 f = tap - 0.5 - corner;
         float4 gathered = depths.GatherRed(sampler, (corner + 1.0) / size);
-        float4 isLit = select(receiver >= gathered, float4(1.0), float4(0.0));
+        float4 isLit = select(receiver + dot(slope, tap - position) >= gathered, float4(1.0), float4(0.0));
         // x lower left, y lower right, z upper right, w upper left, with "lower" one texel further down.
         lit += lerp(lerp(isLit.w, isLit.z, f.x), lerp(isLit.x, isLit.y, f.x), f.y);
     }

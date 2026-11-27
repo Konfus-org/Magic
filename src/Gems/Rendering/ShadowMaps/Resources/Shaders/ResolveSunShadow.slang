@@ -170,7 +170,7 @@ SunShadow FilterSunShadow(SunShadowConstants constants, GpuShadowView view, floa
     float rotation = noise * TwoPi;
     float widest = max(constants.maxPenumbra, 1.0);
     SunShadow result = { 1.0, 0.0, 0.0, 0.0 };
-    Blockers blockers = FindBlockers(maps, texel.xy, texel.z, widest, view.rect, rotation, constants.blockerTaps);
+    Blockers blockers = FindBlockers(maps, texel.xy, texel.z, float2(0.0), widest, view.rect, rotation, constants.blockerTaps);
     if (blockers.count == 0.0)
         return result;
 
@@ -178,7 +178,7 @@ SunShadow FilterSunShadow(SunShadowConstants constants, GpuShadowView view, floa
     // angular radius across that distance, in texels of the cascade.
     float reach = (blockers.depth - texel.z) * view.depthRange;
     float radius = clamp(reach * tan(SunAngularRadius) / view.texelSize, 1.0, widest);
-    result.lit = FilterShadow(maps, texel.xy, texel.z, radius, view.rect, rotation, constants.filterTaps);
+    result.lit = FilterShadow(maps, texel.xy, texel.z, float2(0.0), radius, view.rect, rotation, constants.filterTaps);
     result.penumbra = radius;
     return result;
 }
