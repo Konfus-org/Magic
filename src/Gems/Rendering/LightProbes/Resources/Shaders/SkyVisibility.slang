@@ -12,10 +12,11 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
+import Core.Color;
 import Scene.ShadowViews;
 import Light.Ambient;
 
-// What the passes read beyond the frame, C#'s SkyVisibilityConstants, 144 bytes.
+// What the passes read beyond the frame, C#'s SkyVisibilityConstants, 160 bytes.
 struct SkyVisibilityConstants
 {
     // The views of the near and far maps, their atlases, and the sampler that clamps.
@@ -54,6 +55,9 @@ struct SkyVisibilityConstants
     uint3 nearCounts;
     // The near probes' volume.
     uint nearProbes;
+    // The sky's radiance as spherical harmonics, in the rows of Light.Ambient's sky irradiance buffer.
+    uint skyIrradiance;
+    uint3 padding;
 };
 
 // The widest angle from the mirror direction, as a cosine, of the directions that the specular visibility counts.
@@ -131,19 +135,59 @@ ProbeVolume GetFarVolume(SkyVisibilityConstants constants)
     return volume;
 }
 
-// The ambient cube at a surface's point, read from the 8 probes about it as a trilinear filter does, each probe behind
-// the surface's plane left out, so a wall's face does not read the probes on its other side: the normal-based leak
-// reduction of Unity's Adaptive Probe Volumes. The point is moved off the surface by the sampling biases first. A
-// plain trilinear read where every probe is behind, and false outside the volume.
+// The steps of the march from a surface's point to a probe, and how far behind what the camera sees a step must be,
+// in metres, to count as inside a wall: past the depth's error, and less than a thick wall.
+static const uint HiddenSteps = 4u;
+static const float HiddenNearest = 0.05;
+static const float HiddenFarthest = 1.0;
+
+// Whether a wall lies between a surface's point and a probe, both relative to the camera, as the camera sees it: a
+// march along the line between them, as a screen-space contact shadow marches (as in "Bend Studio's Screen Space
+// Shadows", Days Gone, SIGGRAPH 2023), finds a step that lies just behind the depth that the camera sees there. A
+// step off the screen or before the sky tells nothing.
+bool IsProbeHidden(FrameConstants frame, TextureRef depthTexture, float3 from, float3 to)
+{
+    float2 size = float2(frame.width, frame.height);
+    for (uint step = 1u; step <= HiddenSteps; step++)
+    {
+        float3 at = lerp(from, to, float(step) / float(HiddenSteps));
+        float4 clip = mul(float4(at, 1.0), frame.viewProjection);
+        if (clip.w <= frame.near)
+            continue;
+
+        float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
+        if (any(uv < 0.0) || any(uv >= 1.0))
+            continue;
+
+        float depth = depthTexture.Load(uint2(uv * size), 0u).x;
+        if (depth == 0.0)
+            continue;
+
+        float behind = clip.w - frame.near / depth;
+        if (behind > HiddenNearest && behind < HiddenFarthest)
+            return true;
+    }
+
+    return false;
+}
+
+// The ambient cube at a surface's point, read from the 8 probes about it as a trilinear filter does. A probe behind the
+// surface's plane is left out, so a wall's face does not read the probes on its other side: the normal-based leak
+// reduction of Unity's Adaptive Probe Volumes. With isMarched, a probe that the camera sees a wall in front of is left
+// out too, so a floor beside an outer wall does not read the probes outside it. The point is moved off the surface by
+// the sampling biases first. A plain trilinear read where every probe is left out, and false outside the volume.
 bool TrySampleProbes(
     ProbeVolume probes,
     SamplerRef sampler,
+    FrameConstants frame,
+    bool isMarched,
     float3 surface,
     float3 sampled,
     float3 normal,
     out AmbientCube cube
 )
 {
+    TextureRef depthTexture = { frame.depth };
     cube = OpenCube;
     float3 cell = (sampled - probes.origin) / probes.cell;
     float3 last = float3(probes.counts) - 1.0;
@@ -168,7 +212,10 @@ bool TrySampleProbes(
         float4 faces = volume.SampleLevel(sampler, texel / size, 0.0);
         float2 more = volume.SampleLevel(sampler, (texel + float3(1.0, 0.0, 0.0)) / size, 0.0).xy;
         float3 position = probes.origin + float3(probe) * probes.cell;
-        float w = dot(position - surface, normal) > 0.0 ? trilinear : 0.0;
+        bool isBehind = dot(position - surface, normal) <= 0.0;
+        bool isHidden = isMarched && !isBehind
+            && IsProbeHidden(frame, depthTexture, sampled - frame.cameraPosition.xyz, position - frame.cameraPosition.xyz);
+        float w = isBehind || isHidden ? 0.0 : trilinear;
         sum.first += faces * w;
         sum.second += more * w;
         weight += w;
@@ -196,9 +243,23 @@ float2 EvaluateProbes(AmbientCube cube, float3 normal, float3 mirror)
     return float2(diffuse, specular);
 }
 
-// Each probe of a volume: what it sees along each direction of its maps, as an ambient cube. Each face is the mean of
-// what is seen, weighted by the cosine to the face and by one over the directions' density: they are cosine-weighted,
-// so the density goes as the cosine of the angle from the zenith.
+// The sky's luminance along a direction, from its radiance's spherical harmonics.
+float GetSkyLuminance(ArrayRef<float4> harmonics, float3 d)
+{
+    float basis[9];
+    GetHarmonics(d, basis);
+    float3 radiance = float3(0.0);
+    for (uint i = 0u; i < SkyHarmonics; i++)
+        radiance += basis[i] * harmonics[i].rgb;
+
+    return max(GetLuminance(radiance), 0.0);
+}
+
+// Each probe of a volume: what it sees along each direction of its maps, as an ambient cube. Each face is the share of
+// the sky's light that it gets: what is seen, weighted by the cosine to the face, by how bright the sky is along the
+// direction, and by one over the directions' density. The directions are cosine-weighted, so the density goes as the
+// cosine of the angle from the zenith. So a face towards the bright sky about the sun gets more of its light through an
+// opening on that side than through one on the other.
 [shader("compute")]
 [numthreads(4, 4, 4)]
 void TestSkyProbes(uint3 thread : SV_DispatchThreadID)
@@ -215,6 +276,7 @@ void TestSkyProbes(uint3 thread : SV_DispatchThreadID)
     float3 point = probes.origin + float3(probe) * probes.cell - constants.anchor;
     TextureRef atlas = { isNear ? constants.nearAtlas : constants.farAtlas };
     SamplerRef sampler = { constants.sampler };
+    ArrayRef<float4> harmonics = { constants.skyIrradiance };
     // The faces +x, -x, +y, +z and -z, then the whole sky.
     float seen[6] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
     float total[6] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
@@ -226,7 +288,7 @@ void TestSkyProbes(uint3 thread : SV_DispatchThreadID)
             continue;
 
         float3 d = view.towards;
-        float density = 1.0 / max(d.y, 0.05);
+        float density = max(GetSkyLuminance(harmonics, d), 1e-8) / max(d.y, 0.05);
         float facing[6] = { max(d.x, 0.0), max(-d.x, 0.0), max(d.y, 0.0), max(d.z, 0.0), max(-d.z, 0.0), 1.0 };
         for (uint face = 0u; face < 6u; face++)
         {
@@ -287,7 +349,7 @@ void TraceSkyVisibility(uint3 thread : SV_DispatchThreadID)
     {
         float3 at = world + normal * constants.normalOffset + view * (0.25 * constants.nearCell);
         AmbientCube cube;
-        hasNear = TrySampleProbes(GetNearVolume(constants), sampler, world, at, normal, cube);
+        hasNear = TrySampleProbes(GetNearVolume(constants), sampler, frame, true, world, at, normal, cube);
         near = EvaluateProbes(cube, normal, mirror);
     }
 
@@ -299,7 +361,7 @@ void TraceSkyVisibility(uint3 thread : SV_DispatchThreadID)
     {
         float3 at = world + normal * (0.5 * constants.probeCell) + view * (0.25 * constants.probeCell);
         AmbientCube cube;
-        TrySampleProbes(GetFarVolume(constants), sampler, world, at, normal, cube);
+        TrySampleProbes(GetFarVolume(constants), sampler, frame, false, world, at, normal, cube);
         far = EvaluateProbes(cube, normal, mirror);
     }
 

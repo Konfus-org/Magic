@@ -22,9 +22,10 @@ public readonly record struct SkyLightInput(GpuView View, SkyTables? Sky);
 public readonly record struct SkyFitInput(GpuWorld World, GpuInstances Instances);
 
 /// <summary>
-/// What the far probes take once a frame: the world, with its main camera, and the sky's maps with their depth.
+/// What the probes take for the view: the world, with its main camera, the sky's maps with their depth, and the sky's
+/// light, which weighs each direction by how bright the sky is there.
 /// </summary>
-public readonly record struct SkyProbesInput(GpuWorld World, SkyViews Views, SkyDepth Depth);
+public readonly record struct SkyProbesInput(GpuWorld World, SkyViews Views, SkyDepth Depth, SkyLight Light);
 
 /// <summary>
 /// The probes of the frame: volumes of the ambient cube of how much of the sky each probe sees, 2 texels a probe
@@ -407,7 +408,7 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Tests the far probes against the far maps and the near probes against the near maps, once a frame.
+    /// Tests the far probes against the far maps and the near probes against the near maps, for the view.
     /// </summary>
     /// <returns>
     /// The probes, or none while the shader builds or what it writes is not made.
@@ -468,6 +469,7 @@ public sealed class Renderer
             ProbeFirstZ = (uint)firstZ,
             NearProbes = nearVolume.Value.Id,
             NearOrigin = nearOrigin,
+            SkyIrradiance = input.Light.Irradiance.Id,
         };
         if (!graph.Upload(constants.Value, [row]) || !graph.Upload(nearConstants.Value, [row with { ProbeSet = 1 }]))
             return null;
@@ -480,6 +482,7 @@ public sealed class Renderer
                 RenderStages.Light
             )
             .Reads(input.World.Frame, constants.Value, input.Views.FarMaps, input.Depth.FarAtlas)
+            .Reads(input.Light.Irradiance)
             .Writes(volume.Value)
             .DispatchOver(ProbesAcross, ProbesHigh, depth);
         graph
@@ -490,6 +493,7 @@ public sealed class Renderer
                 RenderStages.Light
             )
             .Reads(input.World.Frame, nearConstants.Value, input.Views.NearMaps, input.Depth.NearAtlas)
+            .Reads(input.Light.Irradiance)
             .Writes(nearVolume.Value)
             .DispatchOver(NearProbesAcross, NearProbesHigh, NearProbesAcross);
         _probeOrigin = origin;
@@ -661,7 +665,7 @@ internal record struct SkyLightConstants
 }
 
 /// <summary>
-/// What the sky's visibility passes read beyond the frame, 144 bytes, the twin of <c>SkyVisibility.slang</c>'s.
+/// What the sky's visibility passes read beyond the frame, 160 bytes, the twin of <c>SkyVisibility.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct SkyVisibilityConstants
@@ -725,4 +729,12 @@ internal record struct SkyVisibilityConstants
     public uint NearCountZ;
 
     public uint NearProbes;
+
+    public uint SkyIrradiance;
+
+    public uint Padding0;
+
+    public uint Padding1;
+
+    public uint Padding2;
 }

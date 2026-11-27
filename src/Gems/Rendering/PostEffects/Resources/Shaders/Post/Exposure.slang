@@ -1,11 +1,12 @@
-// The exposure, with the stops of "compensation" added. With "metered" at 0 it is a camera's fixed exposure, set by
-// "ev100", the exposure value at ISO 100: the picture times 1 / (1.2 × 2^EV100) (Lagarde and de Rousiers, "Moving
-// Frostbite to Physically Based Rendering", 2014, section 5.1). So a room is as dark beside the daylight outside as a
-// camera sees it. With "metered" at 1 it is metered from the picture and adapted to over time, as an eye adapts: the
-// picture multiplied by what brings the average of its log luminance to the key (Reinhard et al., "Photographic Tone
-// Reproduction for Digital Images", 2002). Its target's levels average each pixel's log luminance, black pixels left
-// out, down to one texel, which moves towards the frame's average from last frame's. Over a range wide enough for light
-// in physical units.
+// The exposure, with the stops of "compensation" added: a camera's fixed exposure, set by "ev100", the exposure value
+// at ISO 100, that the eye's adaptation moves by up to "adaptation" stops. The fixed exposure is the picture times
+// 1 / (1.2 × 2^EV100) (Lagarde and de Rousiers, "Moving Frostbite to Physically Based Rendering", 2014, section 5.1), so a
+// room is as dark beside the daylight outside as a camera sees it. The eye's exposure is metered from the picture and
+// adapted to over time: what brings the average of its log luminance to the key (Reinhard et al., "Photographic Tone
+// Reproduction for Digital Images", 2002). It is clamped to the stops about the fixed one, as Unreal's auto exposure is
+// clamped between a least and a most EV100, so a dark room brightens a little as the eyes adapt and still reads dark.
+// Its target's levels average each pixel's log luminance, black pixels left out, down to one texel, which moves towards
+// the frame's average from last frame's. Over a range wide enough for light in physical units.
 module "Post/Exposure";
 
 import Core.Color;
@@ -45,7 +46,7 @@ public struct Exposure : IPixelEffect
     public static const uint History = 1;
 
     public float compensation;
-    public float metered;
+    public float adaptation;
     public float ev100;
 
     // Each texel of a level holds the average log luminance of the pixels under it times the share of them that aren't
@@ -74,15 +75,15 @@ public struct Exposure : IPixelEffect
 
     public float3 Apply(float3 color, PixelEffectInputs inputs)
     {
-        if (metered == 0.0)
-            return color * exp2(compensation - ev100) / 1.2;
-
         uint last = min(firstbithigh(max(inputs.size.x, inputs.size.y)), Levels - 1u);
         float4 metered = inputs.target.Load(uint2(0u), last);
         float adapted = metered.z + metered.w;
         float daylight = DaylightStops * saturate((adapted - RoomLog) / (DaylightLog - RoomLog));
         float night = NightStops * saturate((TwilightLog - adapted) / (TwilightLog - DimmestLog));
-        return color * Key * exp2(compensation + daylight - night - adapted);
+        float fixedLog = -ev100 - log2(1.2);
+        float eyeLog = log2(Key) + daylight - night - adapted;
+        float stops = max(adaptation, 0.0);
+        return color * exp2(compensation + clamp(eyeLog, fixedLog - stops, fixedLog + stops));
     }
 }
 
