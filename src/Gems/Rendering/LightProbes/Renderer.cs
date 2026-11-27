@@ -27,10 +27,18 @@ public readonly record struct SkyFitInput(GpuWorld World, GpuInstances Instances
 public readonly record struct SkyProbesInput(GpuWorld World, SkyViews Views, SkyDepth Depth);
 
 /// <summary>
-/// The far probes of the frame: a volume of the first two bands of spherical harmonics of how much of the sky each
-/// probe sees, <see cref="Counts"/> probes <see cref="Cell"/> metres apart from <see cref="Origin"/> in the world.
+/// The probes of the frame: volumes of the ambient cube of how much of the sky each probe sees, 2 texels a probe
+/// along x. The far ones are <see cref="Counts"/> probes <see cref="Cell"/> metres apart from <see cref="Origin"/> in the
+/// world; the near ones are <see cref="Renderer"/>'s dense grid from <see cref="NearOrigin"/>.
 /// </summary>
-public readonly record struct SkyProbes(GpuTexture Volume, Vector3 Origin, float Cell, (int X, int Y, int Z) Counts);
+public readonly record struct SkyProbes(
+    GpuTexture Volume,
+    Vector3 Origin,
+    float Cell,
+    (int X, int Y, int Z) Counts,
+    GpuTexture NearVolume,
+    Vector3 NearOrigin
+);
 
 /// <summary>
 /// What the sky's visibility takes for each view: the view, the sky's maps with their depth, and the far probes.
@@ -98,17 +106,27 @@ public sealed class Renderer
     private const float ProbeCell = 4;
 
     /// <summary>
+    /// The near probes: 96 by 32 by 96, half a metre apart, snapped to a cell, about the camera. Each is tested again
+    /// each frame against the near maps.
+    /// </summary>
+    private const int NearProbesAcross = 96;
+
+    private const int NearProbesHigh = 32;
+
+    private const float NearProbeCell = 0.5f;
+
+    /// <summary>
     /// The slabs of the probe volume along z that are tested again in turn, one a frame, while the volume stays.
     /// </summary>
     private const int ProbeSlabs = 8;
 
     /// <summary>
-    /// The metres from the camera inside which the near maps alone decide a pixel's visibility, and past which the
-    /// probes alone do.
+    /// The metres from the camera inside which the near probes alone decide a pixel's visibility, and past which the
+    /// far probes alone do: inside the near probes' half width of 24 m.
     /// </summary>
-    private const float NearDistance = 40;
+    private const float NearDistance = 20;
 
-    private const float FarDistance = 48;
+    private const float FarDistance = 23;
 
     /// <summary>
     /// Metres of depth that still count as the point itself: half a near texel of the default maps.
@@ -389,7 +407,7 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Tests each far probe against the far maps, once a frame.
+    /// Tests the far probes against the far maps and the near probes against the near maps, once a frame.
     /// </summary>
     /// <returns>
     /// The probes, or none while the shader builds or what it writes is not made.
@@ -407,17 +425,29 @@ public sealed class Renderer
             (MathF.Round(eye.Z / FarSnap) * FarSnap) - (ProbesAcross / 2 * ProbeCell)
         );
         Result<GpuTexture> volume = _gpu.GetTexture(
-            new("Sky probes", ProbesAcross, ProbesHigh, GpuFormat.R16G16B16A16Sfloat)
+            new("Sky probes", 2 * ProbesAcross, ProbesHigh, GpuFormat.R16G16B16A16Sfloat)
             {
                 Kind = TextureKind.Texture3D,
                 Depth = ProbesAcross,
             }
         );
-        Result<GpuBuffer> constants = _gpu.GetBuffer(
-            new("Sky probe constants", Unsafe.SizeOf<SkyVisibilityConstants>())
+        Vector3 nearOrigin = new(
+            (MathF.Round(eye.X / NearProbeCell) * NearProbeCell) - (NearProbesAcross / 2 * NearProbeCell),
+            (MathF.Round(eye.Y / NearProbeCell) * NearProbeCell) - (NearProbesHigh / 2 * NearProbeCell),
+            (MathF.Round(eye.Z / NearProbeCell) * NearProbeCell) - (NearProbesAcross / 2 * NearProbeCell)
         );
+        Result<GpuTexture> nearVolume = _gpu.GetTexture(
+            new("Near sky probes", 2 * NearProbesAcross, NearProbesHigh, GpuFormat.R16G16B16A16Sfloat)
+            {
+                Kind = TextureKind.Texture3D,
+                Depth = NearProbesAcross,
+            }
+        );
+        int constantsBytes = Unsafe.SizeOf<SkyVisibilityConstants>();
+        Result<GpuBuffer> constants = _gpu.GetBuffer(new("Sky probe constants", constantsBytes));
+        Result<GpuBuffer> nearConstants = _gpu.GetBuffer(new("Near sky probe constants", constantsBytes));
         Result<GpuSampler> sampler = _gpu.GetSampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
-        Result asked = Result.FindFailure(volume, constants, sampler);
+        Result asked = Result.FindFailure(volume, nearVolume, constants, nearConstants, sampler);
         if (!asked.Ok)
         {
             frame.Fail(RenderFailure.Resource, "The sky's probes are not made", asked.Error);
@@ -436,8 +466,10 @@ public sealed class Renderer
             Probes = volume.Value.Id,
             ProbeOrigin = origin,
             ProbeFirstZ = (uint)firstZ,
+            NearProbes = nearVolume.Value.Id,
+            NearOrigin = nearOrigin,
         };
-        if (!graph.Upload(constants.Value, [row]))
+        if (!graph.Upload(constants.Value, [row]) || !graph.Upload(nearConstants.Value, [row with { ProbeSet = 1 }]))
             return null;
 
         graph
@@ -450,10 +482,27 @@ public sealed class Renderer
             .Reads(input.World.Frame, constants.Value, input.Views.FarMaps, input.Depth.FarAtlas)
             .Writes(volume.Value)
             .DispatchOver(ProbesAcross, ProbesHigh, depth);
+        graph
+            .Compute(
+                "Test near sky probes",
+                _probeShader,
+                new GpuConstants(input.World.Frame.Id, nearConstants.Value.Id),
+                RenderStages.Light
+            )
+            .Reads(input.World.Frame, nearConstants.Value, input.Views.NearMaps, input.Depth.NearAtlas)
+            .Writes(nearVolume.Value)
+            .DispatchOver(NearProbesAcross, NearProbesHigh, NearProbesAcross);
         _probeOrigin = origin;
         _probeSlab = isWhole ? 0 : (_probeSlab + 1) % ProbeSlabs;
 
-        return new SkyProbes(volume.Value, origin, ProbeCell, (ProbesAcross, ProbesHigh, ProbesAcross));
+        return new SkyProbes(
+            volume.Value,
+            origin,
+            ProbeCell,
+            (ProbesAcross, ProbesHigh, ProbesAcross),
+            nearVolume.Value,
+            nearOrigin
+        );
     }
 
     /// <summary>
@@ -500,6 +549,8 @@ public sealed class Renderer
         {
             Probes = probes.Volume.Id,
             ProbeOrigin = probes.Origin,
+            NearProbes = probes.NearVolume.Id,
+            NearOrigin = probes.NearOrigin,
             Traced = traced.Value.Id,
             Blurred = blurred.Value.Id,
             HalfWidth = (uint)halfWidth,
@@ -512,7 +563,7 @@ public sealed class Renderer
         graph
             .Compute("Trace sky visibility", _traceShader, header, RenderStages.Light)
             .Reads(view.Frame, constants.Value, view.Depth, view.GBufferNormal)
-            .Reads(input.Views.NearMaps, input.Depth.NearAtlas, probes.Volume)
+            .Reads(probes.Volume, probes.NearVolume)
             .Writes(traced.Value)
             .DispatchOver(halfWidth, halfHeight);
         graph
@@ -546,6 +597,10 @@ public sealed class Renderer
             NearDistance = NearDistance,
             FarDistance = FarDistance,
             DepthBias = DepthBias,
+            NearCell = NearProbeCell,
+            NearCountX = NearProbesAcross,
+            NearCountY = NearProbesHigh,
+            NearCountZ = NearProbesAcross,
         };
 
     /// <summary>
@@ -606,7 +661,7 @@ internal record struct SkyLightConstants
 }
 
 /// <summary>
-/// What the sky's visibility passes read beyond the frame, 112 bytes, the twin of <c>SkyVisibility.slang</c>'s.
+/// What the sky's visibility passes read beyond the frame, 144 bytes, the twin of <c>SkyVisibility.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct SkyVisibilityConstants
@@ -657,5 +712,17 @@ internal record struct SkyVisibilityConstants
 
     public uint ProbeFirstZ;
 
-    public float Padding0;
+    public uint ProbeSet;
+
+    public Vector3 NearOrigin;
+
+    public float NearCell;
+
+    public uint NearCountX;
+
+    public uint NearCountY;
+
+    public uint NearCountZ;
+
+    public uint NearProbes;
 }

@@ -300,11 +300,13 @@ shadow maps. The settings are in `LightProbesSettings`. `Rendering.IsSkyVisibili
   `Rendering.FarRegion` metres. Each is an orthographic depth map in a D16 atlas.
 - A map draws again only where a caster changes, up to `Rendering.ChangeRectsPerFrame` rectangles a frame, and when
   the camera moves out of its box, up to `Rendering.ScrollMapsPerFrame` maps a frame.
-- Near the camera, each pixel tests the near maps to find the share of the sky that its diffuse light and its reflection
-  see. Each map stands for a cone of the sky, so it is filtered as a light as wide as that cone, as soft shadows are:
-  the sky through a window falls as a soft patch, not as one sharp copy of the window for each direction. Far from the
-  camera, a volume of probes, 4 m apart, tests the far maps: all of it when it moves with the camera, else one eighth of
-  it each frame. The two blend between 40 m and 48 m.
+- Each probe tests the maps to find the share of the sky that it sees, and keeps it as an ambient cube: the share
+  that a surface facing each of the 6 axes sees. Near the camera, a grid of probes 0.5 m apart, 48 m wide and 16 m
+  high, tests the near maps each frame. Far from the camera, a volume of probes 4 m apart tests the far maps: all of it
+  when it moves with the camera, else one eighth of it each frame.
+- Each pixel reads the 8 probes about a point a little off its surface, as a trilinear filter does. A probe behind the
+  surface is left out, so a wall's face does not see the probes on its other side. The near grid and the far volume
+  blend between 20 m and 23 m.
 - The share of the sky dims the sky's light at each pixel, so a room or a cave that sees no sky is dark.
 - The `SkyVisibility` debug view shows the share of the sky that each pixel's diffuse light sees.
 
@@ -384,8 +386,9 @@ effects of the frame as its `PictureEffects`. The shading of the renderer runs t
   settings are in `PostEffectsSettings`.
 - A `PostProcessing` lists each effect that it wants. To use a different tonemap, put its material in the place of
   `Agx`.
-- The `Exposure` effect measures the picture each frame and adapts in about one second. Its `compensation` param
-  adds stops.
+- The `Exposure` effect is a camera's fixed exposure, set by its `ev100` param, so a room is as dark beside the
+  daylight as a camera sees it. With its `metered` param at 1, it measures the picture each frame and adapts in about
+  one second. Its `compensation` param adds stops.
 - While an effect that declares jitter runs, the camera moves to a different point in each pixel each frame.
 - An effect shows when its material and its passes are built. A domain shows when its effects are built or failed.
 
