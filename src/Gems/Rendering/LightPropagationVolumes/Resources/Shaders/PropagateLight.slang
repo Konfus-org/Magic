@@ -188,13 +188,12 @@ bool IsWallBetween(VolumeConstants constants, GpuShadowView view, TextureRef atl
     float2 rect = float2(view.rect.zw);
     float seenA = atlas.Load(uint2(float2(view.rect.xy) + uvA * rect), 0u).x;
     float seenB = atlas.Load(uint2(float2(view.rect.xy) + uvB * rect), 0u).x;
-    // Reversed depth: a point is behind what the map sees where its depth is less, by more than the bias.
+    // Reversed depth: a point is behind what the map sees where its depth is less, by more than the bias, and in
+    // front of it otherwise. A point within the bias behind the surface is in front, so that no point is neither.
     float bias = WallBias / view.depthRange;
     bool isBehindA = a.z < seenA - bias;
     bool isBehindB = b.z < seenB - bias;
-    bool isFrontA = a.z >= seenA;
-    bool isFrontB = b.z >= seenB;
-    return (isFrontA && isBehindB) || (isBehindA && isFrontB);
+    return isBehindA != isBehindB;
 }
 
 // The walls on the faces of each cell towards +x, +y and +z: 1 where a wall stops the light, 0 where it passes.
