@@ -1,8 +1,11 @@
-// The exposure, metered from the picture and adapted to over time, as an eye adapts: the picture multiplied by what
-// brings the average of its log luminance to the key (Reinhard et al., "Photographic Tone Reproduction for Digital
-// Images", 2002), with the stops of "compensation" added. Its target's levels average each pixel's log luminance, black
-// pixels left out, down to one texel, which moves towards the frame's average from last frame's. Over a range wide
-// enough for light in physical units.
+// The exposure, with the stops of "compensation" added. With "metered" at 0 it is a camera's fixed exposure, set by
+// "ev100", the exposure value at ISO 100: the picture times 1 / (1.2 × 2^EV100) (Lagarde and de Rousiers, "Moving
+// Frostbite to Physically Based Rendering", 2014, section 5.1). So a room is as dark beside the daylight outside as a
+// camera sees it. With "metered" at 1 it is metered from the picture and adapted to over time, as an eye adapts: the
+// picture multiplied by what brings the average of its log luminance to the key (Reinhard et al., "Photographic Tone
+// Reproduction for Digital Images", 2002). Its target's levels average each pixel's log luminance, black pixels left
+// out, down to one texel, which moves towards the frame's average from last frame's. Over a range wide enough for light
+// in physical units.
 module "Post/Exposure";
 
 import Core.Color;
@@ -42,6 +45,8 @@ public struct Exposure : IPixelEffect
     public static const uint History = 1;
 
     public float compensation;
+    public float metered;
+    public float ev100;
 
     // Each texel of a level holds the average log luminance of the pixels under it times the share of them that aren't
     // black, and that share. The last, one texel, also holds the log luminance adapted to, in z and w.
@@ -69,6 +74,9 @@ public struct Exposure : IPixelEffect
 
     public float3 Apply(float3 color, PixelEffectInputs inputs)
     {
+        if (metered == 0.0)
+            return color * exp2(compensation - ev100) / 1.2;
+
         uint last = min(firstbithigh(max(inputs.size.x, inputs.size.y)), Levels - 1u);
         float4 metered = inputs.target.Load(uint2(0u), last);
         float adapted = metered.z + metered.w;

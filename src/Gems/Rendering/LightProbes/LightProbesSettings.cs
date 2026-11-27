@@ -20,7 +20,7 @@ public sealed class LightProbesSettings : ISettings
     public bool IsSkyVisibilityOn { get; set; } = true;
 
     /// <summary>
-    /// The directions of the near maps, which test each pixel near the camera.
+    /// The directions of the near maps, which test the near probes.
     /// </summary>
     public int NearDirections { get; set; } = 32;
 
@@ -45,8 +45,7 @@ public sealed class LightProbesSettings : ISettings
     public int DirectionMapResolution { get; set; } = 1024;
 
     /// <summary>
-    /// The metres a pixel's point moves along its normal before the near maps test it. A wall thinner than twice this
-    /// can leak.
+    /// The metres a pixel's point moves off its surface, along its normal, before it reads the near probes.
     /// </summary>
     public float SkyNormalOffset { get; set; } = 0.25f;
 

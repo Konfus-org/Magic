@@ -1,6 +1,8 @@
 {
     "shader": { "id": 6713985074374313334 },
     "params": {
-        "compensation": { "x": 0 }
+        "compensation": { "x": 0 },
+        "metered": { "x": 0 },
+        "ev100": { "x": 13.7 }
     }
 }
