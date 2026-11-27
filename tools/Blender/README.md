@@ -120,6 +120,8 @@ says each stage on the console.
 | A prefab | One collection, which an empty brings in at each place that uses it |
 | A chunk of the world | One collection named for the chunk, under the domain's, with that chunk's own objects |
 | An entity that draws a model | One object that links the model's mesh, with its materials on the object's slots |
+| An empty material slot | The material `Empty slot`, which is clear to the camera and to shadows |
+| A shadowless renderer | An object with its shadow visibility off |
 | An entity that brings a prefab in | One empty whose instance collection is that prefab's collection |
 
 The import puts the domain under one collection of the domain's name. In it, the objects of each chunk of the world

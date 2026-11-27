@@ -157,8 +157,9 @@ def make_mesh(assets, renderer, models, meshes):
 
 
 def place_renderer(collection, assets, name, renderer, world, models, materials, meshes):
-    # Magic reads the renderer's isShadowless nowhere, so every mesh casts a shadow here, as every mesh does there.
     o = bpy.data.objects.new(name, make_mesh(assets, renderer, models, meshes))
+    # A shadowless renderer is drawn, but light goes through it.
+    o.visible_shadow = not renderer.get('isShadowless', False)
     for slot, material in zip(o.material_slots, renderer.get('materials', [])):
         # The material on the object and not on the mesh, so that the mesh stays the model's own.
         slot.link = 'OBJECT'

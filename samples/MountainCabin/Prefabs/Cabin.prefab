@@ -19,7 +19,10 @@
         // The shelf is the one thing the half turn does not fit: it already backs on to its model's +z, so a turn
         // puts its open side in the wall and leaves its back board standing on the room's side of the logs.
         {"name": "Shelf", "components": {"Transform": {"position": {"x": -2.9, "y": 0.45, "z": 2.84}}, "Renderer": {"model": {"id": 300054}, "materials": [{"id": 300068}]}}},
-        {"name": "Lantern", "components": {"Transform": {"position": {"x": 1.55, "y": 1, "z": 0.6}, "rotation": {"x": 0, "y": 1, "z": 0, "w": 0}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 300055}, "materials": [{"id": 300069}, {"id": 300070}], "isShadowless": true}}},
+        // The lantern is drawn twice from one model, each time with one slot empty: the brass frame casts the
+        // shadows of its base, posts and cap, and the flame round the light casts none, so the light gets out.
+        {"name": "Lantern", "components": {"Transform": {"position": {"x": 1.55, "y": 1, "z": 0.6}, "rotation": {"x": 0, "y": 1, "z": 0, "w": 0}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 300055}, "materials": [{"id": 300069}, {"id": 0}]}}},
+        {"name": "Lantern flame", "components": {"Transform": {"position": {"x": 1.55, "y": 1, "z": 0.6}, "rotation": {"x": 0, "y": 1, "z": 0, "w": 0}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 300055}, "materials": [{"id": 0}, {"id": 300070}], "isShadowless": true}}},
         {"name": "Lantern light", "tags": ["lantern"], "components": {"Transform": {"position": {"x": 1.55, "y": 1.17, "z": 0.6}}, "PointLight": {"color": {"r": 1, "g": 0.402, "b": 0.083}, "intensity": 320, "range": 12}, "ScriptContainer": [{"id": 100330, "depth": 0.1}]}},
         {"name": "Ash", "components": {"Transform": {"position": {"x": 3.45, "y": 0.525, "z": 0}, "scale": {"x": 0.16, "y": 0.03, "z": 0.27}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300073}]}}},
         {"name": "Coal", "components": {"Transform": {"position": {"x": 3.45, "y": 0.545, "z": 0.0}, "rotation": {"x": 0, "y": 0.30071, "z": 0, "w": 0.95372}, "scale": {"x": 0.095, "y": 0.055, "z": 0.085}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300071}]}}},

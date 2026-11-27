@@ -12,8 +12,8 @@ import tempfile
 
 import bpy
 
-from .materials import (asset_paths, convert_straight, image_file, map_images, material_values, pack_orm,
-                        read_space, side_of)
+from .materials import (EMPTY_SLOT, asset_paths, convert_straight, image_file, map_images, material_values,
+                        pack_orm, read_space, side_of)
 from .meshes import mesh_hash, model_fault
 from .project import SWAP, comment_lines, read_jsonc, run_magic
 
@@ -332,7 +332,7 @@ def write_materials(export):
     and that material gets no line of the run."""
     lines, written = [], []
     for material in bpy.data.materials:
-        if 'magic_id' not in material:
+        if 'magic_id' not in material or int(material['magic_id']) == EMPTY_SLOT:
             continue
         asset = int(material['magic_id'])
         held = export.assets.get(asset)

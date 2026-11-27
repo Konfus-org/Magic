@@ -543,9 +543,30 @@ def build_material(side):
         build_glass(side)
 
 
+# The id of a slot that holds no material. Magic draws none of the faces of such a slot and casts no shadow from them.
+EMPTY_SLOT = 0
+
+
+def make_empty_slot():
+    """The Blender material of a slot that holds no material: clear to the camera and to shadows, as Magic draws none
+    of its faces."""
+    material = bpy.data.materials.new('Empty slot')
+    material['magic_id'] = str(EMPTY_SLOT)
+    material.use_nodes = True
+    tree = material.node_tree
+    tree.nodes.clear()
+    clear = tree.nodes.new('ShaderNodeBsdfTransparent')
+    output = tree.nodes.new('ShaderNodeOutputMaterial')
+    tree.links.new(clear.outputs['BSDF'], output.inputs['Surface'])
+    return material
+
+
 def make_material(assets, material_id, cache):
     """The Blender material of a Magic material, made one time and linked by every object that uses it."""
     if material_id in cache:
+        return cache[material_id]
+    if material_id == EMPTY_SLOT:
+        cache[material_id] = make_empty_slot()
         return cache[material_id]
     path = assets[material_id][0]
     material = bpy.data.materials.new(os.path.basename(path))
