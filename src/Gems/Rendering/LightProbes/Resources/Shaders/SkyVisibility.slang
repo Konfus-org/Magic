@@ -1,9 +1,10 @@
 // How much of the sky each place sees, from the sky's direction maps: a depth map of the still world for each of a
 // fixed set of directions on the upper hemisphere, as a large spherical array of shadow-mapped lights (Pharr and Green,
-// "Ambient Occlusion", GPU Gems, 2004, ch. 17). A point sees the sky along a direction where nothing in that direction's
-// map lies between it and the sky. The far maps test a volume of probes, each the first two bands of spherical
-// harmonics of what it sees; the near maps test each pixel near the camera. Past the probes and the far maps, the sky
-// is open. The pass header's x is the frame's buffer and its y the buffer of SkyVisibilityConstants.
+// "Ambient Occlusion", GPU Gems, 2004, ch. 17). A point sees the sky along a direction where nothing in that
+// direction's map lies between it and the sky. The far maps test a volume of probes, each the first two bands of
+// spherical harmonics of what it sees; the near maps test each pixel near the camera, each over its cone of the sky.
+// Past the probes and the far maps, the sky is open. The pass header's x is the frame's buffer and its y the buffer of
+// SkyVisibilityConstants.
 module "SkyVisibility";
 
 import Core.Heap;
@@ -12,6 +13,7 @@ import Core.Frame;
 import Core.Math;
 import Scene.ShadowViews;
 import Light.Ambient;
+import Core.Random;
 
 // What the passes read beyond the frame, C#'s SkyVisibilityConstants, 112 bytes.
 struct SkyVisibilityConstants
@@ -50,6 +52,9 @@ struct SkyVisibilityConstants
 // The widest angle from the mirror direction, as a cosine, of the directions that the specular visibility counts.
 static const float SpecularCone = 0.8660254;
 
+// The golden angle in radians, which spreads a spiral's samples evenly.
+static const float GoldenAngle = 2.3999632;
+
 SkyVisibilityConstants LoadVisibilityConstants() { return LoadConstants<SkyVisibilityConstants>(GetPassHeader().y); }
 
 // How much of the sky a point relative to the maps' anchor sees along one map's direction, from 0 to 1: a bilinear
@@ -80,12 +85,100 @@ float TestMap(GpuShadowView view, TextureRef atlas, SamplerRef sampler, float3 p
     return lerp(lerp(seen.w, seen.z, f.x), lerp(seen.x, seen.y, f.x), f.y);
 }
 
+// The texels of the near maps that a soft test reads at most from the point, and the metres above it that its search
+// for blockers reaches.
+static const float ConeMaxTexels = 16.0;
+static const float ConeSearchMeters = 8.0;
+
+// The samples of a soft test's filter.
+static const uint ConeTaps = 8u;
+
+// How much of the sky a point sees along one map's direction, from 0 to 1, over the cone of the sky that the map stands
+// for: the map is filtered as a light as wide as that cone, as percentage-closer soft shadows filter a light (Fernando,
+// "Percentage-Closer Soft Shadows", 2005). The blockers found about the point give their mean distance, and the
+// filter's radius is that distance times the tangent of the cone's half angle. So the sky through an opening falls on a
+// surface as a soft patch, as wide as the cone makes it, and not as the sharp shape of the opening that each direction
+// alone casts. The filter turns by rotation, which the blur and the temporal anti-aliasing average. -1 where the map is
+// not drawn or does not hold the point.
+float TestMapOverCone(
+    GpuShadowView view,
+    TextureRef atlas,
+    SamplerRef sampler,
+    float3 point,
+    float bias,
+    float coneTangent,
+    float rotation
+)
+{
+    if (view.rect.z == 0u)
+        return -1.0;
+
+    float4 clip = mul(float4(point, 1.0), view.viewProjection);
+    float2 uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
+    if (any(uv <= 0.0) || any(uv >= 1.0))
+        return -1.0;
+
+    // A point above the near plane sees the sky.
+    float depth = clip.z;
+    if (depth >= 1.0)
+        return 1.0;
+
+    // The reads keep inside the map's own rectangle of the atlas.
+    float2 size = float2(atlas.GetSize(0u));
+    float2 lowest = float2(view.rect.xy) + 1.0;
+    float2 highest = float2(view.rect.xy + view.rect.zw) - 1.0;
+    float2 texel = float2(view.rect.xy) + uv * float2(view.rect.zw);
+    float reference = depth + bias / view.depthRange;
+    float2 turn = float2(cos(rotation), sin(rotation));
+
+    // The blockers: the point's texels and four more on a ring as wide as the widest filter the search reaches.
+    float ring = 0.7 * min(ConeSearchMeters * coneTangent / view.texelSize, ConeMaxTexels);
+    float blockers = 0.0;
+    float blockerDepth = 0.0;
+    for (uint i = 0u; i < 5u; i++)
+    {
+        float2 offset = float2(0.0);
+        if (i > 0u)
+        {
+            float2 side = i == 1u ? float2(1.0, 0.0) : i == 2u ? float2(0.0, 1.0) : i == 3u ? float2(-1.0, 0.0)
+                : float2(0.0, -1.0);
+            offset = float2(side.x * turn.x - side.y * turn.y, side.x * turn.y + side.y * turn.x) * ring;
+        }
+
+        float4 depths = atlas.GatherRed(sampler, clamp(texel + offset, lowest, highest) / size);
+        // A texel nearer the sky than the point blocks it.
+        float4 isBlocking = float4(depths > reference);
+        blockers += dot(isBlocking, float4(1.0));
+        blockerDepth += dot(isBlocking, depths - depth);
+    }
+
+    if (blockers == 0.0)
+        return 1.0;
+
+    // The filter over a disc as wide as the cone is at the blockers' mean distance, its samples on a Vogel spiral.
+    float distance = blockerDepth / blockers * view.depthRange;
+    float radius = clamp(distance * coneTangent / view.texelSize, 0.5, ConeMaxTexels);
+    float seen = 0.0;
+    for (uint tap = 0u; tap < ConeTaps; tap++)
+    {
+        float along = sqrt((float(tap) + 0.5) / float(ConeTaps)) * radius;
+        float angle = float(tap) * GoldenAngle + rotation;
+        float2 offset = float2(cos(angle), sin(angle)) * along;
+        float4 depths = atlas.GatherRed(sampler, clamp(texel + offset, lowest, highest) / size);
+        seen += dot(float4(depths <= reference), float4(0.25));
+    }
+
+    return seen / float(ConeTaps);
+}
+
 // The cosine-weighted share of the sky a point sees from the near maps for a normal, and the share it sees near the
-// mirror direction; the mean of every drawn direction where none faces the normal or lies near the mirror.
-float2 TestNearMaps(SkyVisibilityConstants constants, float3 point, float3 normal, float3 mirror)
+// mirror direction; the mean of every drawn direction where none faces the normal or lies near the mirror. Each map
+// is tested over its share of the sky, a cone whose cap is one map's share of the hemisphere.
+float2 TestNearMaps(SkyVisibilityConstants constants, float3 point, float3 normal, float3 mirror, float rotation)
 {
     TextureRef atlas = { constants.nearAtlas };
     SamplerRef sampler = { constants.sampler };
+    float coneTangent = tan(acos(1.0 - 1.0 / max(float(constants.nearCount), 1.0)));
     float diffuse = 0.0;
     float diffuseWeight = 0.0;
     float specular = 0.0;
@@ -95,7 +188,7 @@ float2 TestNearMaps(SkyVisibilityConstants constants, float3 point, float3 norma
     for (uint i = 0u; i < constants.nearCount; i++)
     {
         GpuShadowView view = LoadShadowView(constants.nearMaps, i);
-        float seen = TestMap(view, atlas, sampler, point, constants.depthBias);
+        float seen = TestMapOverCone(view, atlas, sampler, point, constants.depthBias, coneTangent, rotation);
         if (seen < 0.0)
             continue;
 
@@ -230,7 +323,13 @@ void TraceSkyVisibility(uint3 thread : SV_DispatchThreadID)
 
     float2 near = float2(1.0);
     if (distance < constants.farDistance)
-        near = TestNearMaps(constants, world + normal * constants.normalOffset - constants.anchor, normal, mirror);
+    {
+        // A turn for each pixel that changes each frame, so the blur and the temporal anti-aliasing average the
+        // filter's pattern away.
+        float rotation = GetInterleavedGradientNoise(pixel, frame.frameIndex) * TwoPi;
+        near = TestNearMaps(constants, world + normal * constants.normalOffset - constants.anchor, normal, mirror,
+            rotation);
+    }
 
     float blend = saturate((distance - constants.nearDistance) / max(constants.farDistance - constants.nearDistance,
         Epsilon));
