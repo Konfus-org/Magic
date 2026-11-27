@@ -25,8 +25,8 @@ public struct AmbientTerms
     // How much of the sky each pixel sees, diffuse in red and specular in green, and the sampler of the map and of it.
     public uint skyVisibility;
     public uint sampler;
-    // The volume of the far sky probes.
-    public uint skyProbes;
+    // The sun's light that one bounce brings to each pixel, at half size.
+    public uint bounce;
 }
 
 public AmbientTerms GetAmbientTerms() { return LoadFrameRow<AmbientTerms>(AmbientOffset); }
@@ -128,22 +128,37 @@ public float3 SampleSkyMap(AmbientTerms terms, float3 direction, float roughness
     return map.SampleLevel(sampler, ToOctahedralUv(direction), level).rgb;
 }
 
-// The share of the sky a pixel sees, diffuse in x and specular in y, from the half-size visibility: the 4 texels
-// around it, each weighed by how near the depth and the normal of the pixel it stands for are to this pixel's. All of
-// the sky where no gem makes it.
+// The share of the sky a pixel sees, diffuse in x and specular in y, from the half-size visibility. All of the sky
+// where no gem makes it.
 public float2 LoadSkyVisibility(AmbientTerms terms, FrameConstants frame, uint2 pixel, float depth, float3 normal)
 {
     if (terms.skyVisibility == 0u)
         return float2(1.0);
 
-    TextureRef visibility = { terms.skyVisibility };
+    return LoadHalfSize(terms.skyVisibility, frame, pixel, depth, normal).xy;
+}
+
+// The sun's light that one bounce brings to a pixel, from the half-size bounce. None where no gem makes it.
+public float3 LoadBounce(AmbientTerms terms, FrameConstants frame, uint2 pixel, float depth, float3 normal)
+{
+    if (terms.bounce == 0u)
+        return float3(0.0);
+
+    return LoadHalfSize(terms.bounce, frame, pixel, depth, normal).rgb;
+}
+
+// A half-size texture at a pixel: the 4 texels around it, each weighed by how near the depth and the normal of the
+// pixel it stands for are to this pixel's.
+float4 LoadHalfSize(uint id, FrameConstants frame, uint2 pixel, float depth, float3 normal)
+{
+    TextureRef visibility = { id };
     TextureRef depthTexture = { frame.depth };
     int2 size = int2(visibility.GetSize(0u));
     int2 full = int2(frame.width, frame.height) - 1;
     int2 base = int2(floor((float2(pixel) + 0.5) * 0.5 - 0.5));
     float2 f = frac((float2(pixel) + 0.5) * 0.5 - 0.5);
     float viewDepth = frame.near / max(depth, 1e-12);
-    float2 sum = float2(0.0);
+    float4 sum = float4(0.0);
     float weight = 0.0;
     for (uint i = 0u; i < 4u; i++)
     {
@@ -157,7 +172,7 @@ public float2 LoadSkyVisibility(AmbientTerms terms, FrameConstants frame, uint2 
             : 0.0;
         float normalWeight = pow(saturate(dot(LoadNormal(frame.gbufferNormal, atPixel), normal)), 8.0);
         float w = bilinear * depthWeight * normalWeight + bilinear * 1e-4;
-        sum += visibility.Load(uint2(at), 0u).xy * w;
+        sum += visibility.Load(uint2(at), 0u) * w;
         weight += w;
     }
 

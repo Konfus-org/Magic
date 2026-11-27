@@ -296,3 +296,26 @@ public readonly record struct SkyViews
 /// The atlases of <see cref="SkyViews"/> with this frame's draws drawn into them.
 /// </summary>
 public readonly record struct SkyDepth(GpuTexture NearAtlas, GpuTexture FarAtlas);
+
+/// <summary>
+/// The sun's reflective shadow map of one view: an orthographic view from the sun around the camera in
+/// <see cref="Views"/>, one row, and its targets, which hold for each texel the first surface that the sun lights there.
+/// </summary>
+/// <remarks>
+/// The shadow gem makes it for each view. A geometry gem draws the depth of the surfaces into <see cref="Depth"/>,
+/// reversed, their diffuse colour into <see cref="Albedo"/> and their normal, as 0.5 + 0.5 times the unit normal, into
+/// <see cref="Normal"/>, and gives them back as <see cref="BounceMaps"/> (Dachsbacher and Stamminger, "Reflective
+/// Shadow Maps", 2005). Positions are relative to the view's camera.
+/// </remarks>
+public readonly record struct BounceViews(
+    GpuBuffer Views,
+    GpuTexture Depth,
+    GpuTexture Albedo,
+    GpuTexture Normal,
+    Matrix4x4 ClipToRelative
+);
+
+/// <summary>
+/// The targets of <see cref="BounceViews"/> with the surfaces that the sun lights drawn into them.
+/// </summary>
+public readonly record struct BounceMaps(GpuTexture Depth, GpuTexture Albedo, GpuTexture Normal);

@@ -38,6 +38,11 @@ flowchart LR
     LocalFit -- LocalShadowViews --> LocalDepth[ClusteredGeometry local depth]
     LocalDepth -- LocalShadowDepth --> LocalResolve[ShadowMaps local resolve]
     LocalResolve -- LocalShadows --> Shading
+    View -- GpuView --> BounceFit[ShadowMaps bounce fit]
+    BounceFit -- BounceViews --> BounceDepth[ClusteredGeometry bounce map]
+    BounceDepth -- BounceMaps --> Bounce[ShadowMaps bounce light]
+    Sky -- SkyTables --> Bounce
+    Bounce -- BounceLight --> Shading
     View -- GpuView --> Gtao[AmbientOcclusion]
     Gtao -- AmbientOcclusion --> Shading
     View -- GpuView --> SkyLight[LightProbes sky light]
@@ -268,6 +273,12 @@ listed together. The settings are in `ShadowMapsSettings`. `Rendering.IsShadowMa
   from the caster, as wide as the light's size makes it.
 - A short march through the depth buffer towards the sun shadows the gap that the sun's shadow map leaves where a
   caster meets its shadow. The local lights have no contact shadow yet.
+- The sun's light bounces one time off the surfaces that it lights (reflective shadow maps, Dachsbacher and
+  Stamminger 2005). Each frame a geometry gem draws the depth, diffuse colour and normal of the lit surfaces into a
+  map from the sun, `Rendering.BounceResolution` texels on each side and `Rendering.BounceRadius` metres around the
+  camera. Each pixel then gathers `Rendering.BounceSamples` lit texels up to `Rendering.BounceReach` metres away, at
+  half size, and a blur that keeps to the surfaces smooths it. A sunlit floor so lights the room's walls and ceiling.
+  Nothing tests for a wall between the two, so the reach stays short. `Rendering.IsBounceOn` turns it off.
 - The `CascadeAtlas` and `ShadowAtlas` debug views show the depth of the cascades and of the local lights' tiles.
 - `samples/MountainCabin/MountainCabin.magic` opens the cabin with this gem, AmbientOcclusion and LightProbes.
   `samples/MountainCabin/MountainCabinTraced.magic` opens it with the traced gems in their place.

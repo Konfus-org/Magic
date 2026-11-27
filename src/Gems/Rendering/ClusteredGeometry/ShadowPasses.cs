@@ -44,6 +44,8 @@ internal sealed class ShadowPasses
 
     private readonly IGraphicsApi _gpu;
 
+    private readonly bool _isReflective;
+
     private readonly ShaderEntry _cullShader;
 
     private readonly DrawShaders _singleSidedShaders;
@@ -56,14 +58,22 @@ internal sealed class ShadowPasses
 
     private readonly DrawShaders _impostorShaders;
 
-    internal ShadowPasses(AssetManager assets, IGraphicsApi gpu)
+    /// <param name="assets">Where the passes' shaders are loaded from.</param>
+    /// <param name="gpu">What builds the shaders and holds the buffers.</param>
+    /// <param name="isReflective">
+    /// Whether the passes draw a reflective shadow map: each texel's diffuse colour and normal beside its depth, and no
+    /// impostors.
+    /// </param>
+    internal ShadowPasses(AssetManager assets, IGraphicsApi gpu, bool isReflective = false)
     {
         _gpu = gpu;
+        _isReflective = isReflective;
         _cullShader = PassShaders.GetEntry(assets, "CullShadowClusters", "CullShadowClusters");
-        ShaderEntry vertex = PassShaders.GetEntry(assets, "DrawShadows", "DrawShadowVertex", ShaderStage.Vertex);
+        string prefix = isReflective ? "DrawReflective" : "DrawShadow";
+        ShaderEntry vertex = PassShaders.GetEntry(assets, "DrawShadows", $"{prefix}Vertex", ShaderStage.Vertex);
         _singleSidedShaders = new(
             vertex,
-            PassShaders.GetEntry(assets, "DrawShadows", "DrawShadowPixel", ShaderStage.Pixel)
+            PassShaders.GetEntry(assets, "DrawShadows", $"{prefix}Pixel", ShaderStage.Pixel)
         )
         {
             Depth = DepthMode.TestAndWrite,
@@ -71,7 +81,7 @@ internal sealed class ShadowPasses
         _doubleSidedShaders = _singleSidedShaders with { Cull = CullMode.None };
         _fadingShaders = _singleSidedShaders with
         {
-            Pixel = PassShaders.GetEntry(assets, "DrawShadows", "DrawShadowFadingPixel", ShaderStage.Pixel),
+            Pixel = PassShaders.GetEntry(assets, "DrawShadows", $"{prefix}FadingPixel", ShaderStage.Pixel),
         };
         _fadingDoubleSidedShaders = _fadingShaders with { Cull = CullMode.None };
         _impostorShaders = new(
@@ -134,9 +144,9 @@ internal sealed class ShadowPasses
         if (!graph.Upload(constants.Value, [cull]) || !graph.Upload(counts.Value, zeros))
             return Result.Failure("the shadow cull's constants were not staged.");
 
-        // Cull: one group an instance, over every view.
+        // Cull: one group an instance, over every view. A reflective draw reads the table of diffuse colours.
         GpuBuffer frameBuffer = target.Frame;
-        GpuConstants header = new(frameBuffer.Id, constants.Value.Id);
+        GpuConstants header = new(frameBuffer.Id, constants.Value.Id, target.Albedos?.Id ?? 0);
         uint across = (uint)Math.Min(target.InstanceCount, CullGroupsPerRow);
         uint down = (uint)Math.Max((target.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow, 1);
         graph
@@ -160,6 +170,9 @@ internal sealed class ShadowPasses
         Draw(names.DoubleSided, _doubleSidedShaders, TargetLoad.Keep, ShadowDrawRegion.DoubleSided);
         Draw(names.Fading, _fadingShaders, TargetLoad.Keep, ShadowDrawRegion.Fading);
         Draw(names.FadingDoubleSided, _fadingDoubleSidedShaders, TargetLoad.Keep, ShadowDrawRegion.FadingDoubleSided);
+        if (_isReflective)
+            return Result.Success();
+
         DrawIndirect(
             graph
                 .Draw(names.Impostors, _impostorShaders, GetTargets(TargetLoad.Keep), header, RenderStages.Geometry)
@@ -177,6 +190,13 @@ internal sealed class ShadowPasses
         GpuRenderTargets GetTargets(TargetLoad load) =>
             new()
             {
+                Colors = target.Colors.IsDefaultOrEmpty
+                    ? []
+                    : ImmutableArray.CreateRange(
+                        target.Colors,
+                        static (color, load) => new GpuTarget { Texture = color, Load = load },
+                        load
+                    ),
                 Depth = new GpuTarget { Texture = atlas, Load = load },
             };
 
@@ -184,6 +204,7 @@ internal sealed class ShadowPasses
             DrawIndirect(
                 graph
                     .Draw(name, shaders, GetTargets(load), header, RenderStages.Geometry)
+                    .Reads(target.Albedos ?? GpuBuffer.None)
                     .Reads(
                         frameBuffer,
                         constants.Value,
@@ -256,6 +277,14 @@ internal readonly record struct ShadowTarget
     public required GpuTexture Atlas { get; init; }
 
     public required bool IsCleared { get; init; }
+
+    /// <summary>
+    /// The colour targets of a reflective shadow map, drawn beside the atlas's depth, and the table of each material
+    /// row's diffuse colour that it draws them from; none, or default, for a plain one.
+    /// </summary>
+    public ImmutableArray<GpuTexture> Colors { get; init; }
+
+    public GpuBuffer? Albedos { get; init; }
 }
 
 /// <summary>

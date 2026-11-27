@@ -24,3 +24,13 @@ public readonly record struct SkyLight(GpuBuffer Irradiance, GpuTexture Map, int
 /// light by it, upsampled to each pixel by depth and normal.
 /// </remarks>
 public readonly record struct SkyVisibility(GpuTexture Visibility);
+
+/// <summary>
+/// The sun's light that one bounce off the lit surfaces brings to each pixel of the view, as the irradiance over pi that
+/// a white diffuse surface reflects, at half the picture's size in <c>R16G16B16A16Sfloat</c>.
+/// </summary>
+/// <remarks>
+/// The shading's step writes its id into the frame's buffer as <see cref="GpuAmbient"/>, and adds it to the diffuse
+/// ambient light, upsampled to each pixel by depth and normal.
+/// </remarks>
+public readonly record struct BounceLight(GpuTexture Irradiance);

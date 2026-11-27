@@ -52,6 +52,7 @@ public readonly record struct ShadingInput(
     AmbientOcclusion? Occlusion,
     SkyLight? SkyLight,
     SkyVisibility? SkyVisibility,
+    BounceLight? Bounce,
     IndirectLight? Light,
     Reflections? Reflections,
     Air? Air,
@@ -781,10 +782,15 @@ public sealed class Renderer
             SkyMapLevels = (uint)(input.SkyLight?.MapLevels ?? 0),
             Sampler = input.SkyLight?.Sampler.Id ?? 0,
             SkyVisibility = input.SkyVisibility?.Visibility.Id ?? 0,
+            Bounce = input.Bounce?.Irradiance.Id ?? 0,
         };
         SkyVisibility? skySeen = null;
+        BounceLight? bounce = null;
         if (graph.Upload(gpu.Frame, [ambient], GpuAmbient.Offset))
-            (occlusion, skyLight, skySeen) = (input.Occlusion, input.SkyLight, input.SkyVisibility);
+        {
+            (occlusion, skyLight) = (input.Occlusion, input.SkyLight);
+            (skySeen, bounce) = (input.SkyVisibility, input.Bounce);
+        }
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ?
@@ -833,6 +839,9 @@ public sealed class Renderer
 
         if (skySeen is { } seen)
             shade.Reads(seen.Visibility);
+
+        if (bounce is { } bounced)
+            shade.Reads(bounced.Irradiance);
 
         if (input.Air is { Clouds: { } clouds })
             shade.Reads(clouds);

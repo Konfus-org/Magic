@@ -15,6 +15,7 @@ import Scene.Impostors;
 import Scene.Models;
 import Scene.ShadowViews;
 import Scene.ShadowDraws;
+import Core.Math;
 
 // How far back towards the light, in the instance's radii, the point is that an impostor is seen from: far enough that
 // its rays are as good as parallel. Never under a kilometre.
@@ -74,6 +75,76 @@ Varyings DrawShadowVertex(uint vertexIndex : SV_VertexID, uint row : SV_StartIns
 
 [shader("pixel")]
 void DrawShadowPixel(Varyings input) {}
+
+// A cluster drawn into a reflective shadow map: its depth, and at each texel its material's diffuse colour and its
+// normal, which the light that one bounce brings is gathered from. The pass header's z is the heap id of the table of
+// each material row's diffuse colour.
+struct ReflectiveVaryings
+{
+    float4 position : SV_Position;
+    float clipDistances[4] : SV_ClipDistance;
+    nointerpolation float fade : FADE;
+    float3 normal : NORMAL;
+    nointerpolation uint material : MATERIAL;
+}
+
+struct ReflectiveTargets
+{
+    float4 albedo : SV_Target0;
+    // 0.5 + 0.5 times the unit normal.
+    float4 normal : SV_Target1;
+}
+
+[shader("vertex")]
+ReflectiveVaryings DrawReflectiveVertex(uint vertexIndex : SV_VertexID, uint row : SV_StartInstanceLocation)
+{
+    Models models = GetModels();
+    ClusterConstants clusters = GetClusters();
+    FrameConstants frame = GetFrame();
+    ShadowCluster entry = LoadShadowCluster(row);
+    GpuShadowView view = LoadShadowView(GetShadowCull().views, entry.view);
+    GpuInstance instance = LoadInstance(models.instances, entry.instance);
+    GpuCluster cluster = LoadCluster(clusters.clusters, entry.cluster);
+    uint vertices = GetVertexPool(cluster, clusters, models.vertices);
+    Vertex vertex = LoadVertex(vertices, LoadIndex(clusters.indices, cluster.indexOffset + vertexIndex));
+    float4 clip = ToShadowClip(view, ToCameraRelative(frame, ToWorld(instance.world, vertex.position)));
+    ReflectiveVaryings output;
+    output.position = ToAtlasClip(view, clip);
+    float4 sides = GetShadowClipDistances(clip);
+    output.clipDistances[0] = sides.x;
+    output.clipDistances[1] = sides.y;
+    output.clipDistances[2] = sides.z;
+    output.clipDistances[3] = sides.w;
+    output.fade = GetImpostorFade(frame, instance);
+    output.normal = ToWorldNormal(instance.world, vertex.normal);
+    output.material = GetMaterial(instance, cluster.materialSlot);
+    return output;
+}
+
+ReflectiveTargets GetReflectiveTargets(ReflectiveVaryings input, bool isFrontFace)
+{
+    ArrayRef<float4> albedos = { GetPassHeader().z };
+    float3 normal = NormalizeSafe(input.normal, float3(0.0, 1.0, 0.0));
+    ReflectiveTargets output;
+    output.albedo = float4(albedos[input.material].rgb, 1.0);
+    output.normal = float4((isFrontFace ? normal : -normal) * 0.5 + 0.5, 1.0);
+    return output;
+}
+
+[shader("pixel")]
+ReflectiveTargets DrawReflectivePixel(ReflectiveVaryings input, bool isFrontFace : SV_IsFrontFace)
+{
+    return GetReflectiveTargets(input, isFrontFace);
+}
+
+[shader("pixel")]
+ReflectiveTargets DrawReflectiveFadingPixel(ReflectiveVaryings input, bool isFrontFace : SV_IsFrontFace)
+{
+    if (GetDither(input.position.xy) < input.fade)
+        discard;
+
+    return GetReflectiveTargets(input, isFrontFace);
+}
 
 // A cluster of an instance in the impostor handoff: the dither keeps the clusters' share of the texels, and the
 // impostor draws the rest.

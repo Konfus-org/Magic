@@ -299,9 +299,9 @@ public record struct GpuAmbient
     public uint Sampler;
 
     /// <summary>
-    /// The volume of the far sky probes, 0 for none.
+    /// The sun's light that one bounce brings to each pixel, at half size, 0 for none.
     /// </summary>
-    public uint SkyProbes;
+    public uint Bounce;
 }
 
 /// <summary>

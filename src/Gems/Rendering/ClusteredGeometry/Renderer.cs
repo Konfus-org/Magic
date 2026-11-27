@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
@@ -42,6 +43,18 @@ public readonly record struct LocalDepthInput(GpuWorld World, ClusterPools Pools
 public readonly record struct SkyDepthInput(GpuWorld World, ClusterPools Pools, SkyViews? Views);
 
 /// <summary>
+/// What the cluster renderer takes to draw the sun's reflective shadow map of a view: the view, the world with its
+/// material shaders, the frame's instances with their material count, the pools, and the map's view and targets.
+/// </summary>
+public readonly record struct BounceDepthInput(
+    GpuView View,
+    GpuWorld World,
+    GpuInstances Instances,
+    ClusterPools Pools,
+    BounceViews? Views
+);
+
+/// <summary>
 /// Draws every model that the world holds as a hierarchy of clusters, GPU-driven, and far away as its impostor.
 /// </summary>
 /// <remarks>
@@ -58,8 +71,14 @@ public sealed class Renderer
         IRender<CascadeDepthInput, CascadeDepth>,
         IRender<LocalDepthInput, LocalShadowDepth>,
         IRender<SkyDepthInput, SkyDepth>,
+        IRender<BounceDepthInput, BounceMaps>,
         IHookIntoDomainLoading
 {
+    /// <summary>
+    /// The bytes of a row of the table of each material row's diffuse colour: a float4.
+    /// </summary>
+    private const int AlbedoBytes = 16;
+
     private static readonly ShadowPassNames _cascadeNames = new("Cascade", "cascade");
 
     private static readonly ShadowPassNames _cacheNames = new("Shadow cache", "shadow cache");
@@ -69,6 +88,8 @@ public sealed class Renderer
     private static readonly ShadowPassNames _nearSkyNames = new("Near sky map", "near sky map");
 
     private static readonly ShadowPassNames _farSkyNames = new("Far sky map", "far sky map");
+
+    private static readonly ShadowPassNames _bounceNames = new("Bounce map", "bounce map");
 
     /// <summary>
     /// When a model draws as its impostor. The game thread writes it, and the step of a view reads it.
@@ -80,6 +101,13 @@ public sealed class Renderer
     private readonly ClusterResources _resources;
     private readonly ClusterPasses _passes;
     private readonly ShadowPasses _shadowPasses;
+    private readonly ShadowPasses _bouncePasses;
+    private readonly ShaderEntry _albedoShader;
+
+    /// <summary>
+    /// The diffuse colour entry for each material shader the renderer has numbered, in their order.
+    /// </summary>
+    private readonly List<ShaderEntry> _albedoShaders = [];
 
     /// <summary>
     /// How many domains have loaded since the start. Render thread.
@@ -103,6 +131,8 @@ public sealed class Renderer
         _resources = new ClusterResources(clusters, assets, threads, gpu);
         _passes = new ClusterPasses(assets, gpu);
         _shadowPasses = new ShadowPasses(assets, gpu);
+        _bouncePasses = new ShadowPasses(assets, gpu, isReflective: true);
+        _albedoShader = PassShaders.GetEntry(assets, "AverageAlbedo", "AverageAlbedo");
     }
 
     /// <summary>
@@ -242,6 +272,88 @@ public sealed class Renderer
             return new CascadeDepth(atlas.Value);
 
         frame.Fail(RenderFailure.Resource, "Shadows are not drawn", drawn.Error);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Draws the sun's reflective shadow map of the view of this turn: each material row's diffuse colour into a table,
+    /// then the depth, the diffuse colour and the normal of each cluster that the sun sees into the map's targets. None
+    /// while the shaders build or after what they draw into was not made.
+    /// </summary>
+    public BounceMaps? Render(in RenderFrame frame, RenderGraph graph, in BounceDepthInput input)
+    {
+        // Without the gem that fits the map's view, nothing is drawn.
+        if (input.Views is not { } views)
+            return null;
+
+        GpuWorld world = input.World;
+        for (int shader = _albedoShaders.Count; shader < world.MaterialShaders.Count; shader++)
+        {
+            _albedoShaders.Add(_albedoShader with { TypeArguments = [world.MaterialShaders[shader]] });
+        }
+
+        GpuState shaders = _gpu.GetState(_bouncePasses.Shaders.AsSpan());
+        GpuState albedoShaders = _gpu.GetState(CollectionsMarshal.AsSpan(_albedoShaders));
+        if (shaders == GpuState.Failed || albedoShaders == GpuState.Failed)
+            frame.Fail(RenderFailure.Shader, "Bounce light is not drawn", "a shader of the bounce map was not built.");
+
+        if (shaders != GpuState.Ready || albedoShaders != GpuState.Ready)
+            return null;
+
+        GpuView view = input.View;
+        int materials = input.Instances.MaterialCount;
+        Result<GpuBuffer> albedos = _gpu.GetBuffer(
+            new("Material albedos", (long)Math.Max(input.Instances.MaterialCapacity, 1) * AlbedoBytes),
+            frame.View
+        );
+        if (!albedos.Ok)
+        {
+            frame.Fail(RenderFailure.Resource, "Bounce light is not drawn", albedos.Error);
+
+            return null;
+        }
+
+        // Each material row's colour, a pass for each material shader, which fills the rows it draws.
+        for (int shader = 0; shader < _albedoShaders.Count; shader++)
+        {
+            graph
+                .Compute(
+                    "Average albedos",
+                    _albedoShaders[shader],
+                    new GpuConstants(view.Frame.Id, albedos.Value.Id, (uint)shader, (uint)materials),
+                    RenderStages.Geometry
+                )
+                .Reads(view.Frame, view.Materials)
+                .Reads(world.HeapTextures.AsSpan())
+                .Writes(albedos.Value)
+                .DispatchOver(Math.Max(materials, 1), 1);
+        }
+
+        Result drawn = _bouncePasses.Record(
+            graph,
+            new ShadowTarget
+            {
+                Names = _bounceNames,
+                Frame = view.Frame,
+                View = frame.View,
+                Views = views.Views,
+                ViewCount = 1,
+                Instances = view.Instances,
+                InstanceCount = view.InstanceCount,
+                Materials = view.Materials,
+                Vertices = view.Vertices,
+                Atlas = views.Depth,
+                IsCleared = true,
+                Colors = [views.Albedo, views.Normal],
+                Albedos = albedos.Value,
+            },
+            input.Pools
+        );
+        if (drawn.Ok)
+            return new BounceMaps(views.Depth, views.Albedo, views.Normal);
+
+        frame.Fail(RenderFailure.Resource, "Bounce light is not drawn", drawn.Error);
 
         return null;
     }

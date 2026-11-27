@@ -72,7 +72,8 @@ float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 // The light a surface at a pixel reflects of what reaches it indirectly, from one source. The diffuse is what a
 // white diffuse surface reflects, its irradiance over pi: the traced light where a gem traces it; else the sky's
 // over the hemisphere around the bent normal, from its spherical harmonics, times the share of the sky the surface
-// sees, where gems make them; else the sky's own ambient. The specular is the traced reflections as far as they
+// sees, where gems make them, and the sun's light that one bounce brings, where a gem makes it; else the sky's own
+// ambient. The specular is the traced reflections as far as they
 // cover the pixel, where the surface is smooth enough for them, less as it roughens to their limit. Elsewhere, it is
 // the sky's prefiltered map along the mirror direction, at the surface's roughness, times the share of the sky that
 // the reflection sees, where a gem made it; else, where a sky entity draws the sky, the sky along the mirror
@@ -107,7 +108,7 @@ float3 ShadeIndirectLight<S : ISky>(
         diffuse = traced.rgb;
     }
     else if (ambient.skyIrradiance != 0u)
-        diffuse = GetSkyIrradiance(ambient, bent) * InvPi * skySeen.x;
+        diffuse = GetSkyIrradiance(ambient, bent) * InvPi * skySeen.x + LoadBounce(ambient, frame, pixel, depth, normal);
     else
         diffuse = S.GetAmbient(CreateSkyInputs(lights, tables, bent, false), bent) * InvPi;
 

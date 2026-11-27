@@ -104,4 +104,30 @@ public sealed class ShadowMapsSettings : ISettings
     /// frame, so a lower number costs time, not a wrong shadow.
     /// </summary>
     public int CacheTilesPerFrame { get; set; } = 32;
+
+    /// <summary>
+    /// Whether the sun's light bounces one time off the surfaces it lights onto those near them, from a reflective
+    /// shadow map around the camera.
+    /// </summary>
+    public bool IsBounceOn { get; set; } = true;
+
+    /// <summary>
+    /// The metres from the camera to the edge of the reflective shadow map. Further out, no bounce light is added.
+    /// </summary>
+    public float BounceRadius { get; set; } = 24;
+
+    /// <summary>
+    /// The texels along each side of the reflective shadow map.
+    /// </summary>
+    public int BounceResolution { get; set; } = 512;
+
+    /// <summary>
+    /// The lit texels that each pixel gathers its bounce light from, 1 to 64. More make the bounce smoother.
+    /// </summary>
+    public int BounceSamples { get; set; } = 32;
+
+    /// <summary>
+    /// The metres across the reflective shadow map from which a pixel gathers its bounce light.
+    /// </summary>
+    public float BounceReach { get; set; } = 3;
 }
