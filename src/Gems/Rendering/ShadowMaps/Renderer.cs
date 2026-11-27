@@ -39,12 +39,6 @@ public readonly record struct LocalResolveInput(LocalShadowViews Views, LocalSha
 public readonly record struct BounceFitInput(GpuView View);
 
 /// <summary>
-/// What the bounce light's gather takes for each view: the view, its reflective shadow map with the lit surfaces drawn
-/// into it, and the sky's tables, which set the sun's light.
-/// </summary>
-public readonly record struct BounceInput(GpuView View, BounceViews Views, BounceMaps Maps, SkyTables? Sky);
-
-/// <summary>
 /// Fits the sun's cascades to each view, and shadows each pixel of the view from their depth, into the frame's
 /// <see cref="ShadowMask"/>.
 /// </summary>
@@ -66,8 +60,7 @@ public sealed class Renderer
         IRender<SunShadowInput, ShadowMask>,
         IRender<LocalFitInput, LocalShadowViews>,
         IRender<LocalResolveInput, LocalShadows>,
-        IRender<BounceFitInput, BounceViews>,
-        IRender<BounceInput, BounceLight>
+        IRender<BounceFitInput, BounceViews>
 {
     /// <summary>
     /// The most cascades a view has: two by two in the atlas.
@@ -129,21 +122,12 @@ public sealed class Renderer
 
     private readonly ShaderEntry _blockerMipShader;
 
-    private readonly ShaderEntry _gatherShader;
-
-    private readonly ShaderEntry _bounceBlurShader;
-
-    private readonly ImmutableArray<ShaderTypeArgument> _openSky;
-
     internal Renderer(ShadowMapsSettings settings, AssetManager assets, IGraphicsApi gpu)
     {
         _settings = settings;
         _gpu = gpu;
         _resolveShader = PassShaders.GetEntry(assets, "ResolveSunShadow", "ResolveSunShadow");
         _blockerMipShader = PassShaders.GetEntry(assets, "BuildBlockerMips", "BuildBlockerMips");
-        _gatherShader = PassShaders.GetEntry(assets, "GatherBounce", "GatherBounce");
-        _bounceBlurShader = PassShaders.GetEntry(assets, "GatherBounce", "BlurBounce");
-        _openSky = SkyTables.GetOpenSky(assets);
         _copyShaders = new(
             PassShaders.GetEntry(assets, "CopyShadowTiles", "CopyShadowTileVertex", ShaderStage.Vertex),
             PassShaders.GetEntry(assets, "CopyShadowTiles", "CopyShadowTilePixel", ShaderStage.Pixel)
@@ -534,80 +518,6 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Gathers the sun's light that one bounce brings to each pixel of the view of this turn from its reflective
-    /// shadow map, at half size, and blurs it along the surfaces.
-    /// </summary>
-    /// <returns>
-    /// The bounce light, or none while the shaders build or what they write is not made.
-    /// </returns>
-    public BounceLight? Render(in RenderFrame frame, RenderGraph graph, in BounceInput input)
-    {
-        ShaderEntry gatherShader = _gatherShader with { TypeArguments = SkyTables.GetSkyType(input.Sky, _openSky) };
-        GpuState state = _gpu.GetState(gatherShader, _bounceBlurShader);
-        if (state == GpuState.Failed)
-            frame.Fail(
-                RenderFailure.Shader,
-                "Bounce light is not drawn",
-                "a shader of the bounce light was not built."
-            );
-
-        if (state != GpuState.Ready)
-            return null;
-
-        GpuView view = input.View;
-        int halfWidth = Math.Max((view.Width + 1) / 2, 1);
-        int halfHeight = Math.Max((view.Height + 1) / 2, 1);
-        TextureDescription half = new("Gathered bounce", halfWidth, halfHeight, GpuFormat.R16G16B16A16Sfloat);
-        Result<GpuTexture> gathered = _gpu.GetTexture(half, frame.View);
-        Result<GpuTexture> blurred = _gpu.GetTexture(half with { Name = "Bounce light" }, frame.View);
-        Result<GpuBuffer> constants = _gpu.GetBuffer(
-            new("Bounce constants", Unsafe.SizeOf<BounceConstants>()),
-            frame.View
-        );
-        Result asked = Result.FindFailure(gathered, blurred, constants);
-        if (!asked.Ok)
-        {
-            frame.Fail(RenderFailure.Resource, "Bounce light is not drawn", asked.Error);
-
-            return null;
-        }
-
-        BounceConstants row = new()
-        {
-            View = input.Views.Views.Id,
-            Depth = input.Maps.Depth.Id,
-            Albedo = input.Maps.Albedo.Id,
-            Normal = input.Maps.Normal.Id,
-            Gathered = gathered.Value.Id,
-            Blurred = blurred.Value.Id,
-            HalfWidth = (uint)halfWidth,
-            HalfHeight = (uint)halfHeight,
-            Samples = (uint)Math.Clamp(_settings.BounceSamples, 1, 64),
-            Reach = Math.Max(_settings.BounceReach, 0.1f),
-            ClipToRelative = input.Views.ClipToRelative,
-        };
-        if (!graph.Upload(constants.Value, [row]))
-            return null;
-
-        GpuConstants header = new(view.Frame.Id, constants.Value.Id);
-        ReadOnlySpan<GpuResource> tables = input.Sky is { HasTables: true } made ? [made.Transmittance, made.View] : [];
-        graph
-            .Compute("Gather bounce light", gatherShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, input.Views.Views, view.Depth, view.GBufferNormal)
-            .Reads(input.Maps.Depth, input.Maps.Albedo, input.Maps.Normal)
-            .Reads(tables)
-            .Writes(gathered.Value)
-            .DispatchOver(halfWidth, halfHeight);
-        graph
-            .Compute("Blur bounce light", _bounceBlurShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, gathered.Value, view.Depth, view.GBufferNormal)
-            .Writes(blurred.Value)
-            .DispatchOver(halfWidth, halfHeight);
-
-        return new BounceLight(blurred.Value);
-    }
-
-    /// <summary>
     /// The depth of split <paramref name="index"/> of <paramref name="count"/> from the near to the far end: the mix
     /// of the logarithmic and the even split by <paramref name="lambda"/>.
     /// </summary>
@@ -843,37 +753,4 @@ internal record struct SunShadowConstants
     public uint ContactSteps;
 
     public float ContactThickness;
-}
-
-/// <summary>
-/// What the bounce light's passes read beyond the frame, 112 bytes, the twin of <c>GatherBounce.slang</c>'s.
-/// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct BounceConstants
-{
-    public uint View;
-
-    public uint Depth;
-
-    public uint Albedo;
-
-    public uint Normal;
-
-    public uint Gathered;
-
-    public uint Blurred;
-
-    public uint HalfWidth;
-
-    public uint HalfHeight;
-
-    public uint Samples;
-
-    public float Reach;
-
-    public float Padding0;
-
-    public float Padding1;
-
-    public Matrix4x4 ClipToRelative;
 }

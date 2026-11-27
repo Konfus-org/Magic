@@ -40,9 +40,12 @@ flowchart LR
     LocalResolve -- LocalShadows --> Shading
     View -- GpuView --> BounceFit[ShadowMaps bounce fit]
     BounceFit -- BounceViews --> BounceDepth[ClusteredGeometry bounce map]
-    BounceDepth -- BounceMaps --> Bounce[ShadowMaps bounce light]
-    Sky -- SkyTables --> Bounce
-    Bounce -- BounceLight --> Shading
+    BounceDepth -- BounceMaps --> Lpv[LightPropagationVolumes]
+    BounceFit -- BounceViews --> Lpv
+    SkyFit -- SkyViews --> Lpv
+    SkyDepth -- SkyDepth --> Lpv
+    Sky -- SkyTables --> Lpv
+    Lpv -- BounceLight --> Shading
     View -- GpuView --> Gtao[AmbientOcclusion]
     Gtao -- AmbientOcclusion --> Shading
     View -- GpuView --> SkyLight[LightProbes sky light]
@@ -273,14 +276,13 @@ listed together. The settings are in `ShadowMapsSettings`. `Rendering.IsShadowMa
   from the caster, as wide as the light's size makes it.
 - A short march through the depth buffer towards the sun shadows the gap that the sun's shadow map leaves where a
   caster meets its shadow. The local lights have no contact shadow yet.
-- The sun's light bounces one time off the surfaces that it lights (reflective shadow maps, Dachsbacher and
-  Stamminger 2005). Each frame a geometry gem draws the depth, diffuse colour and normal of the lit surfaces into a
-  map from the sun, `Rendering.BounceResolution` texels on each side and `Rendering.BounceRadius` metres around the
-  camera. Each pixel then gathers `Rendering.BounceSamples` lit texels up to `Rendering.BounceReach` metres away, at
-  half size, and a blur that keeps to the surfaces smooths it. A sunlit floor so lights the room's walls and ceiling.
-  Nothing tests for a wall between the two, so the reach stays short. `Rendering.IsBounceOn` turns it off.
+- It fits the sun's reflective shadow map (Dachsbacher and Stamminger 2005) around the camera of each view:
+  `Rendering.BounceResolution` texels on each side and `Rendering.BounceRadius` metres around the camera. A geometry
+  gem draws the depth, diffuse colour and normal of the lit surfaces into it, and LightPropagationVolumes spreads their
+  light. `Rendering.IsBounceOn` turns the map off.
 - The `CascadeAtlas` and `ShadowAtlas` debug views show the depth of the cascades and of the local lights' tiles.
-- `samples/MountainCabin/MountainCabin.magic` opens the cabin with this gem, AmbientOcclusion and LightProbes.
+- `samples/MountainCabin/MountainCabin.magic` opens the cabin with this gem, AmbientOcclusion, LightProbes and
+  LightPropagationVolumes.
   `samples/MountainCabin/MountainCabinTraced.magic` opens it with the traced gems in their place.
 
 ## AmbientOcclusion
@@ -323,6 +325,27 @@ shadow maps. The settings are in `LightProbesSettings`. `Rendering.IsSkyVisibili
   between 20 m and 23 m.
 - The share of the sky dims the sky's light at each pixel, so a room or a cave that sees no sky is dark.
 - The `SkyVisibility` debug view shows the share of the sky that each pixel's diffuse light sees.
+
+## LightPropagationVolumes
+
+Spreads the sun's light that bounces off the lit surfaces through a grid around the camera, so a room gets light from
+its sunlit floor and walls (Kaplanyan, "Light Propagation Volumes in CryEngine 3", SIGGRAPH 2009; Kaplanyan and
+Dachsbacher, I3D 2010). The steps follow the same method as the master's thesis of Bozek (FIT VUT, 2016), in code of
+our own. Nothing is ray traced or baked. It needs the reflective shadow map of ShadowMaps and a geometry gem that draws
+it. With LightProbes listed too, the sky's direction maps give the walls. The settings are in
+`LightPropagationVolumesSettings`. `Rendering.IsBounceLightOn` turns it off.
+
+- The grid has 32 cells along each side, `Rendering.CellSize` metres each, around the camera and snapped to whole
+  cells, so the light keeps still while the camera moves.
+- Each frame, each texel of the reflective shadow map puts its light into the cell that it lies in: its diffuse colour
+  times the sun's light on it, towards its normal, as 4 spherical harmonics for each colour.
+- The light then moves one cell on `Rendering.Steps` times. Each cell takes what its 6 neighbours send through its
+  faces and adds it to the sum, so the light bounces round corners.
+- A face between two cells is a wall where a sky direction map that looks along the line between their centres sees a
+  surface between them. A wall stops the light, so a sealed room stays dark.
+- Each pixel reads the sum at its surface, at half size, and shading adds it to the diffuse ambient light.
+  `Rendering.Brightness` scales it.
+- The grid is coarse: the light is soft, and it can creep round a wall thinner than a cell where no sky map sees it.
 
 ## GlobalIllumination
 
