@@ -52,6 +52,12 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
     /// </summary>
     private const int MostInteriors = 64;
 
+    /// <summary>
+    /// The metres that each interior box grows by on each side, so that a surface on its face, and a point that the
+    /// depth puts a little behind that face, is inside.
+    /// </summary>
+    private const float InteriorMargin = 0.1f;
+
     // A name for each step of the propagation: GPU timings are kept by name.
     private static readonly ImmutableArray<string> _stepNames =
     [
@@ -245,8 +251,8 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
     }
 
     /// <summary>
-    /// Fills the boxes with the matrix of each interior box, from the camera-relative world, about
-    /// <paramref name="eye"/>, to its unit cube.
+    /// Fills the boxes with the matrix of each interior box, grown by <see cref="InteriorMargin"/>, from the
+    /// camera-relative world, about <paramref name="eye"/>, to its unit cube.
     /// </summary>
     /// <returns>How many boxes it filled.</returns>
     private int GetBoxes(Vector3 eye)
@@ -268,6 +274,7 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             Transform box = transforms[i] with
             {
                 Position = transforms[i].Position - eye,
+                Scale = transforms[i].Scale + new Vector3(2 * InteriorMargin),
             };
             _boxes[i] = Matrix4x4.Invert(box.Matrix, out Matrix4x4 toBox) ? toBox : default;
         }

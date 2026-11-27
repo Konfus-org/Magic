@@ -341,7 +341,9 @@ it. The `Interior` boxes of the world mark what is inside. The settings are in
   faces and adds it to the sum, so the light bounces round corners.
 - A cell is inside when its centre is in an `Interior` box. Light does not move between a cell inside and one outside,
   and a texel puts its light only into a cell on its own side, so a sealed room stays dark. Fit each box to the inner
-  faces of a room's walls, floor and roof. Boxes that touch or overlap make one inside.
+  faces of a room's walls, floor and roof, or to the middle of walls whose faces are not flat, such as logs. The grid
+  reads each box 0.1 m larger on each side, so a surface on its face is inside. Boxes that touch or overlap make one
+  inside.
 - Each pixel reads the sum at its surface, at half size, from the cells on its own side of the boxes only, and shading
   adds it to the diffuse ambient light. `Rendering.Brightness` scales it.
 - The grid is coarse, so the light is soft. Without a box, light creeps round a wall thinner than a cell. A box has no

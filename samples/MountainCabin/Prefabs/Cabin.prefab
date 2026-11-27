@@ -12,10 +12,10 @@
                 {"name": "Doorstep", "components": {"Transform": {"position": {"x": 0, "y": 0.05, "z": -3.7}, "scale": {"x": 0.9, "y": 0.4, "z": 0.4}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}}
             ]},
         // The room inside the logs, which the bounce light from outside does not spread into: a box from the floor
-        // to the tops of the walls, and a box turned 45 degrees about X under the roof's two slopes, whose top
-        // corner stands under the ridge.
-        {"name": "Room inside", "components": {"Transform": {"position": {"x": 0, "y": 1.75, "z": 0}, "scale": {"x": 7.7, "y": 2.6, "z": 5.8}}, "Interior": {}}},
-        {"name": "Roof inside", "components": {"Transform": {"position": {"x": 0, "y": 3.05, "z": 0}, "rotation": {"x": 0.382683, "y": 0, "z": 0, "w": 0.92388}, "scale": {"x": 7.7, "y": 4.1, "z": 4.1}}, "Interior": {}}},
+        // to the tops of the walls, to the middle of the logs, so the gaps between them are inside, and a box turned
+        // 45 degrees about X under the roof's two slopes, whose top corner stands under the ridge.
+        {"name": "Room inside", "components": {"Transform": {"position": {"x": 0, "y": 1.75, "z": 0}, "scale": {"x": 8.1, "y": 2.6, "z": 6.1}}, "Interior": {}}},
+        {"name": "Roof inside", "components": {"Transform": {"position": {"x": 0, "y": 3.05, "z": 0}, "rotation": {"x": 0.382683, "y": 0, "z": 0, "w": 0.92388}, "scale": {"x": 8.1, "y": 4.3, "z": 4.3}}, "Interior": {}}},
         // A light wool carpet, 1 cm thick, on the floor at 0.45 in the middle of the room: its bounce light shows on
         // the walls and the ceiling.
         {"name": "Carpet", "components": {"Transform": {"position": {"x": 0.2, "y": 0.455, "z": -0.2}, "scale": {"x": 1.4, "y": 0.005, "z": 1.0}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300124}]}}},
