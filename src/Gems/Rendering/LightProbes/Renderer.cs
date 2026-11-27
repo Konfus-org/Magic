@@ -221,8 +221,14 @@ public sealed class Renderer
     /// </returns>
     public SkyViews? Render(in RenderFrame frame, RenderGraph graph, in SkyFitInput input)
     {
+        // While it is off, the atlases are not used and can be let go: each map is drawn whole again once it is on.
         if (!_settings.IsSkyVisibilityOn)
+        {
+            _near?.Reset();
+            _far?.Reset();
+
             return null;
+        }
 
         GpuState state = _gpu.GetState(_clearShaders.Vertex, _clearShaders.Pixel);
         if (state == GpuState.Failed)

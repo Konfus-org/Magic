@@ -137,7 +137,7 @@ ProbeVolume GetFarVolume(SkyVisibilityConstants constants)
 
 // The steps of the march from a surface's point to a probe, and how far behind what the camera sees a step must be,
 // in metres, to count as inside a wall: past the depth's error, and less than a thick wall.
-static const uint HiddenSteps = 4u;
+static const uint HiddenSteps = 6u;
 static const float HiddenNearest = 0.05;
 static const float HiddenFarthest = 1.0;
 
@@ -175,7 +175,9 @@ bool IsProbeHidden(FrameConstants frame, TextureRef depthTexture, float3 from, f
 // surface's plane is left out, so a wall's face does not read the probes on its other side: the normal-based leak
 // reduction of Unity's Adaptive Probe Volumes. With isMarched, a probe that the camera sees a wall in front of is left
 // out too, so a floor beside an outer wall does not read the probes outside it. The point is moved off the surface by
-// the sampling biases first. A plain trilinear read where every probe is left out, and false outside the volume.
+// the sampling biases first. Where every probe is left out, as in a corner, it is the probe in front of the surface
+// that sees the least of the sky, so a corner does not read the open sky outside; a plain trilinear read where every
+// probe is behind the surface; and false outside the volume.
 bool TrySampleProbes(
     ProbeVolume probes,
     SamplerRef sampler,
@@ -200,6 +202,8 @@ bool TrySampleProbes(
     float3 f = cell - float3(first);
     AmbientCube sum = { float4(0.0), float2(0.0) };
     AmbientCube plain = { float4(0.0), float2(0.0) };
+    AmbientCube darkest = { float4(0.0), float2(0.0) };
+    float darkestSky = 2.0;
     float weight = 0.0;
     for (uint i = 0u; i < 8u; i++)
     {
@@ -221,6 +225,12 @@ bool TrySampleProbes(
         weight += w;
         plain.first += faces * trilinear;
         plain.second += more * trilinear;
+        if (!isBehind && trilinear > 0.0 && faces.w < darkestSky)
+        {
+            darkest.first = faces;
+            darkest.second = more;
+            darkestSky = faces.w;
+        }
     }
 
     if (weight > 1e-4)
@@ -228,6 +238,8 @@ bool TrySampleProbes(
         cube.first = sum.first / weight;
         cube.second = sum.second / weight;
     }
+    else if (darkestSky < 2.0)
+        cube = darkest;
     else
         cube = plain;
 

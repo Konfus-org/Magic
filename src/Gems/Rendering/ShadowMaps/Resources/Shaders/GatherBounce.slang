@@ -2,9 +2,9 @@
 // (Dachsbacher and Stamminger, "Reflective Shadow Maps", 2005). Each texel of the map is a small surface that the sun
 // lights, and so a light of its own: its diffuse colour times the sun's light on it. A pixel gathers the texels about
 // its own place in the map, on a spiral that is denser near the centre, and adds the light of each as a small area
-// light: its colour times the cosines at both ends over the distance squared. Nothing tests whether a wall lies
-// between them, but the cosines leave out a texel behind the pixel's surface or one that faces away from it. The
-// spiral turns at each pixel and each frame, and a blur and the temporal anti-aliasing average it. The pass header's x
+// light: its colour times the cosines at both ends over the distance squared. The cosines leave out a texel behind the
+// pixel's surface or one that faces away from it, and a short march through the depth buffer leaves out one that the
+// camera sees a wall in front of, so sunlit ground outside does not light a ceiling through its wall. The spiral turns at each pixel and each frame, and a blur and the temporal anti-aliasing average it. The pass header's x
 // is the frame's buffer and its y the buffer of BounceConstants.
 module "GatherBounce";
 
@@ -44,6 +44,42 @@ static const float NearestSquared = 0.05;
 
 // The golden angle in radians, which spreads a spiral's samples evenly.
 static const float GoldenAngle = 2.3999632;
+
+// The steps of the march from a pixel to a texel, and how far behind what the camera sees a step must be, in metres,
+// to count as hidden: past the depth's error. Any step further behind counts, however far, so a room seen from
+// inside hides all that lies past its walls; a thing in front of the path from the camera hides it too, which only
+// darkens.
+static const uint HiddenSteps = 6u;
+static const float HiddenNearest = 0.05;
+
+// Whether the camera sees a wall between a pixel's point and a texel's, both relative to the camera: a step of the
+// march between them, short of the texel, that lies just behind the depth that the camera sees there. A step off the
+// screen, behind the camera or before the sky tells nothing.
+bool IsTexelHidden(FrameConstants frame, TextureRef depthTexture, float3 from, float3 to)
+{
+    float2 size = float2(frame.width, frame.height);
+    for (uint step = 1u; step <= HiddenSteps; step++)
+    {
+        float3 at = lerp(from, to, float(step) / float(HiddenSteps + 1u));
+        float4 clip = mul(float4(at, 1.0), frame.viewProjection);
+        if (clip.w <= frame.near)
+            continue;
+
+        float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
+        if (any(uv < 0.0) || any(uv >= 1.0))
+            continue;
+
+        float depth = depthTexture.Load(uint2(uv * size), 0u).x;
+        if (depth == 0.0)
+            continue;
+
+        float behind = clip.w - frame.near / depth;
+        if (behind > HiddenNearest)
+            return true;
+    }
+
+    return false;
+}
 
 BounceConstants LoadBounceConstants() { return LoadConstants<BounceConstants>(GetPassHeader().y); }
 
@@ -115,6 +151,9 @@ void GatherBounce<S : ISky>(uint3 thread : SV_DispatchThreadID)
         float3 toPoint = point - source;
         float squared = max(dot(toPoint, toPoint), NearestSquared);
         float transfer = max(dot(sourceNormal, toPoint), 0.0) * max(-dot(normal, toPoint), 0.0) / (squared * squared);
+        if (transfer <= 0.0 || IsTexelHidden(frame, depthTexture, point, source))
+            continue;
+
         irradiance += radiosity * transfer * share * areaScale * InvPi;
     }
 
