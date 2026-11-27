@@ -101,9 +101,14 @@ bool IsCast(GpuShadowView view, FrameConstants frame, GpuInstance instance, GpuC
     if (!IsSphereInShadowView(view, center, cluster.radius * scale))
         return false;
 
-    float texel = GetTexelSizeAt(view, GetViewDepth(view, center, cluster.radius * scale));
-    float parentError = cluster.parentError * scale / texel;
-    float error = cluster.error * scale / texel;
+    // Each error is projected over its group's sphere, as the camera's cut does, so a cluster and its siblings and
+    // children decide the same way about the same group, and the cut leaves no crack between them.
+    float3 parentCenter = ToCameraRelative(frame, ToWorld(instance.world, cluster.parentCenter));
+    float3 detailCenter = ToCameraRelative(frame, ToWorld(instance.world, cluster.detailCenter));
+    float parentTexel = GetTexelSizeAt(view, GetViewDepth(view, parentCenter, cluster.parentRadius * scale));
+    float detailTexel = GetTexelSizeAt(view, GetViewDepth(view, detailCenter, cluster.detailRadius * scale));
+    float parentError = cluster.parentError * scale / parentTexel;
+    float error = cluster.error * scale / detailTexel;
     return parentError > ShadowErrorTexels && error <= ShadowErrorTexels;
 }
 
