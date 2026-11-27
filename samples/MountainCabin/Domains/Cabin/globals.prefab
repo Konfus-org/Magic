@@ -38,7 +38,9 @@
                 {"name": "Wall -X", "components": {"Transform": {"position": {"x": -1.25, "y": 0, "z": 0}, "scale": {"x": 0.25, "y": 1.25, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
                 {"name": "Wall +X", "components": {"Transform": {"position": {"x": 1.25, "y": 0, "z": 0}, "scale": {"x": 0.25, "y": 1.25, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
                 {"name": "Wall -Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": -1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
-                {"name": "Wall +Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": 1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}}
+                {"name": "Wall +Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": 1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
+                // The space inside the shell, which the bounce light from outside does not spread into.
+                {"name": "Inside", "components": {"Transform": {"scale": {"x": 2, "y": 2, "z": 2}}, "Interior": {}}}
             ]},
         // A cave 8 m from the leak room: a shell of stonework 1 m thick around a tunnel 3 m wide and 2.5 m high. It
         // goes 12 m in from its mouth, which faces -Z, and turns 90 degrees to +X for 8.5 m more, so the sky does not

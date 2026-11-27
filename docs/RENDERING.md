@@ -42,8 +42,6 @@ flowchart LR
     BounceFit -- BounceViews --> BounceDepth[ClusteredGeometry bounce map]
     BounceDepth -- BounceMaps --> Lpv[LightPropagationVolumes]
     BounceFit -- BounceViews --> Lpv
-    SkyFit -- SkyViews --> Lpv
-    SkyDepth -- SkyDepth --> Lpv
     Sky -- SkyTables --> Lpv
     Lpv -- BounceLight --> Shading
     View -- GpuView --> Gtao[AmbientOcclusion]
@@ -332,7 +330,7 @@ Spreads the sun's light that bounces off the lit surfaces through a grid around 
 its sunlit floor and walls (Kaplanyan, "Light Propagation Volumes in CryEngine 3", SIGGRAPH 2009; Kaplanyan and
 Dachsbacher, I3D 2010). The steps follow the same method as the master's thesis of Bozek (FIT VUT, 2016), in code of
 our own. Nothing is ray traced or baked. It needs the reflective shadow map of ShadowMaps and a geometry gem that draws
-it. With LightProbes listed too, the sky's direction maps give the walls. The settings are in
+it. The `Interior` boxes of the world mark what is inside. The settings are in
 `LightPropagationVolumesSettings`. `Rendering.IsBounceLightOn` turns it off.
 
 - The grid has 32 cells along each side, `Rendering.CellSize` metres each, around the camera and snapped to whole
@@ -341,11 +339,14 @@ it. With LightProbes listed too, the sky's direction maps give the walls. The se
   times the sun's light on it, towards its normal, as 4 spherical harmonics for each colour.
 - The light then moves one cell on `Rendering.Steps` times. Each cell takes what its 6 neighbours send through its
   faces and adds it to the sum, so the light bounces round corners.
-- A face between two cells is a wall where a sky direction map that looks along the line between their centres sees a
-  surface between them. A wall stops the light, so a sealed room stays dark.
-- Each pixel reads the sum at its surface, at half size, and shading adds it to the diffuse ambient light.
-  `Rendering.Brightness` scales it.
-- The grid is coarse: the light is soft, and it can creep round a wall thinner than a cell where no sky map sees it.
+- A cell is inside when its centre is in an `Interior` box. Light does not move between a cell inside and one outside,
+  and a texel puts its light only into a cell on its own side, so a sealed room stays dark. Fit each box to the inner
+  faces of a room's walls, floor and roof. Boxes that touch or overlap make one inside.
+- Each pixel reads the sum at its surface, at half size, from the cells on its own side of the boxes only, and shading
+  adds it to the diffuse ambient light. `Rendering.Brightness` scales it.
+- The grid is coarse, so the light is soft. Without a box, light creeps round a wall thinner than a cell. A box has no
+  openings, so no bounce light from outside comes in through a door or a window. The sun's light that falls inside
+  through them bounces inside.
 
 ## GlobalIllumination
 

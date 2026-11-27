@@ -4,25 +4,22 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
+using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
+using Magic.Ecs;
+using Magic.Ecs.Components;
 using Magic.Graphics;
+using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.LightPropagationVolumes;
 
 /// <summary>
 /// What the grid takes for each view: the view, the sun's reflective shadow map of it with the lit surfaces drawn,
-/// the sky's direction maps with their depth, which show the walls, and the sky's tables, which set the sun's light.
+/// and the sky's tables, which set the sun's light.
 /// </summary>
-public readonly record struct VolumeInput(
-    GpuView View,
-    BounceViews Views,
-    BounceMaps Maps,
-    SkyViews? Sky,
-    SkyDepth? SkyDepth,
-    SkyTables? Tables
-);
+public readonly record struct VolumeInput(GpuView View, BounceViews Views, BounceMaps Maps, SkyTables? Tables);
 
 /// <summary>
 /// Spreads the sun's light that bounces off the lit surfaces through a grid of cells around the camera of each view,
@@ -33,7 +30,8 @@ public readonly record struct VolumeInput(
 /// It is Crytek's light propagation volumes (Kaplanyan, SIGGRAPH 2009; Kaplanyan and Dachsbacher, I3D 2010), as the
 /// master's thesis of Bozek, FIT VUT 2016, also builds them. Each frame the texels of the sun's reflective shadow map
 /// put their light into the cells they lie in, the light moves one cell on a number of times, and each pixel reads
-/// the sum. The walls between cells come from the sky's direction maps, so a sealed room gets no light from outside.
+/// the sum. The <see cref="Interior"/> boxes of the world are inside: light does not move between a cell inside and
+/// one outside, and a pixel reads only the cells on its own side, so a sealed room gets no light from outside.
 /// </para>
 /// <para>
 /// The grid has <see cref="Cells"/> cells along each side, each <see cref="LightPropagationVolumesSettings.CellSize"/>
@@ -49,6 +47,11 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
 
     private const int MostSteps = 32;
 
+    /// <summary>
+    /// The most interior boxes that the grid reads.
+    /// </summary>
+    private const int MostInteriors = 64;
+
     // A name for each step of the propagation: GPU timings are kept by name.
     private static readonly ImmutableArray<string> _stepNames =
     [
@@ -59,9 +62,15 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
 
     private readonly IGraphicsApi _gpu;
 
+    private readonly IEcs _ecs;
+
+    private readonly Mailbox<EcsSnapshot<Transform, Interior>> _interiors = new();
+
+    private readonly Matrix4x4[] _boxes = new Matrix4x4[MostInteriors];
+
     private readonly ShaderEntry _injectShader;
 
-    private readonly ShaderEntry _wallShader;
+    private readonly ShaderEntry _insideShader;
 
     private readonly ShaderEntry _propagateShader;
 
@@ -69,12 +78,18 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
 
     private readonly ImmutableArray<ShaderTypeArgument> _openSky;
 
-    internal Renderer(LightPropagationVolumesSettings settings, AssetManager assets, IGraphicsApi gpu)
+    /// <summary>
+    /// Whether the error for more boxes than the grid reads is shown, so it shows one time and not each frame.
+    /// </summary>
+    private bool _isTooManyLogged;
+
+    internal Renderer(LightPropagationVolumesSettings settings, AssetManager assets, IEcs ecs, IGraphicsApi gpu)
     {
         _settings = settings;
         _gpu = gpu;
+        _ecs = ecs;
         _injectShader = PassShaders.GetEntry(assets, "PropagateLight", "InjectLight");
-        _wallShader = PassShaders.GetEntry(assets, "PropagateLight", "FindWalls");
+        _insideShader = PassShaders.GetEntry(assets, "PropagateLight", "FindInside");
         _propagateShader = PassShaders.GetEntry(assets, "PropagateLight", "PropagateLight");
         _pixelShader = PassShaders.GetEntry(assets, "PropagateLight", "LightPixels");
         _openSky = SkyTables.GetOpenSky(assets);
@@ -92,7 +107,7 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             return null;
 
         ShaderEntry injectShader = _injectShader with { TypeArguments = SkyTables.GetSkyType(input.Tables, _openSky) };
-        GpuState state = _gpu.GetState(injectShader, _wallShader, _propagateShader, _pixelShader);
+        GpuState state = _gpu.GetState(injectShader, _insideShader, _propagateShader, _pixelShader);
         if (state == GpuState.Failed)
             frame.Fail(RenderFailure.Shader, "Bounce light is not spread", "a shader of it was not built.");
 
@@ -110,8 +125,8 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
         Result<GpuTexture> first = _gpu.GetTexture(light, frame.View);
         Result<GpuTexture> second = _gpu.GetTexture(light with { Name = "Light volume step" }, frame.View);
         Result<GpuTexture> sum = _gpu.GetTexture(light with { Name = "Light volume sum" }, frame.View);
-        Result<GpuTexture> walls = _gpu.GetTexture(
-            new("Light volume walls", Cells, Cells, GpuFormat.R16G16B16A16Sfloat)
+        Result<GpuTexture> inside = _gpu.GetTexture(
+            new("Light volume inside", Cells, Cells, GpuFormat.R16G16B16A16Sfloat)
             {
                 Kind = TextureKind.Texture3D,
                 Depth = Cells,
@@ -126,7 +141,11 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             new("Light volume constants", Unsafe.SizeOf<VolumeConstants>()),
             frame.View
         );
-        Result asked = Result.FindFailure(first, second, sum, walls, output, constants);
+        Result<GpuBuffer> interiors = _gpu.GetBuffer(
+            new("Interior boxes", MostInteriors * Unsafe.SizeOf<Matrix4x4>()),
+            frame.View
+        );
+        Result asked = Result.FindFailure(first, second, sum, inside, output, constants, interiors);
         if (!asked.Ok)
         {
             frame.Fail(RenderFailure.Resource, "Bounce light is not spread", asked.Error);
@@ -143,25 +162,23 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             (MathF.Floor(eye.Y / cell) - (Cells / 2)) * cell,
             (MathF.Floor(eye.Z / cell) - (Cells / 2)) * cell
         );
-        SkyViews? sky = input.SkyDepth is null ? null : input.Sky;
+        int boxCount = GetBoxes(eye);
         VolumeConstants row = new()
         {
             ClipToRelative = input.Views.ClipToRelative,
             Origin = corner - eye,
             Cell = cell,
-            ToAnchor = sky is { } anchored ? eye - anchored.Anchor : Vector3.Zero,
             Size = Cells,
             First = first.Value.Id,
             Second = second.Value.Id,
             Sum = sum.Value.Id,
-            Walls = walls.Value.Id,
+            Inside = inside.Value.Id,
             MapView = input.Views.Views.Id,
             MapDepth = input.Maps.Depth.Id,
             MapAlbedo = input.Maps.Albedo.Id,
             MapNormal = input.Maps.Normal.Id,
-            SkyMaps = sky?.NearMaps.Id ?? 0,
-            SkyCount = (uint)(sky?.NearCount ?? 0),
-            SkyAtlas = sky?.NearAtlas.Id ?? 0,
+            Interiors = interiors.Value.Id,
+            InteriorCount = (uint)boxCount,
             Output = output.Value.Id,
             HalfWidth = (uint)halfWidth,
             HalfHeight = (uint)halfHeight,
@@ -170,24 +187,25 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
         if (!graph.Upload(constants.Value, [row]))
             return null;
 
+        if (boxCount > 0 && !graph.Upload(interiors.Value, _boxes.AsSpan(0, boxCount)))
+            return null;
+
         GpuConstants header = new(view.Frame.Id, constants.Value.Id);
         ReadOnlySpan<GpuResource> tables = input.Tables is { HasTables: true } made
             ? [made.Transmittance, made.View]
             : [];
         graph
+            .Compute("Find the inside", _insideShader, header, RenderStages.Light)
+            .Reads(view.Frame, constants.Value, interiors.Value)
+            .Writes(inside.Value)
+            .DispatchOver(Cells, Cells, Cells);
+        graph
             .Compute("Inject light", injectShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, input.Views.Views)
+            .Reads(view.Frame, constants.Value, input.Views.Views, interiors.Value)
             .Reads(input.Maps.Depth, input.Maps.Albedo, input.Maps.Normal)
             .Reads(tables)
             .Writes(first.Value, sum.Value)
             .DispatchOver(Cells, Cells, Cells);
-        ComputePass findWalls = graph
-            .Compute("Find light walls", _wallShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value);
-        if (sky is { } seen)
-            findWalls.Reads(seen.NearMaps, seen.NearAtlas);
-
-        findWalls.Writes(walls.Value).DispatchOver(Cells, Cells, Cells);
 
         // Each step reads the light of the last and writes the other volume, and adds to the sum.
         int steps = Math.Clamp(_settings.Steps, 1, MostSteps);
@@ -202,23 +220,64 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
                     new GpuConstants(view.Frame.Id, constants.Value.Id, (uint)step),
                     RenderStages.Light
                 )
-                .Reads(view.Frame, constants.Value, from, walls.Value)
+                .Reads(view.Frame, constants.Value, from, inside.Value)
                 .Writes(to, sum.Value)
                 .DispatchOver(Cells, Cells, Cells);
         }
 
         graph
             .Compute("Light pixels from the volume", _pixelShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, sum.Value, view.Depth, view.GBufferNormal)
+            .Reads(view.Frame, constants.Value, sum.Value, inside.Value, interiors.Value)
+            .Reads(view.Depth, view.GBufferNormal)
             .Writes(output.Value)
             .DispatchOver(halfWidth, halfHeight);
 
         return new BounceLight(output.Value);
     }
+
+    /// <summary>
+    /// Publishes the world's interior boxes for the frames to come. Game thread.
+    /// </summary>
+    internal void PublishInteriors()
+    {
+        _interiors.Back.Fill(_ecs);
+        _interiors.Publish();
+    }
+
+    /// <summary>
+    /// Fills the boxes with the matrix of each interior box, from the camera-relative world, about
+    /// <paramref name="eye"/>, to its unit cube.
+    /// </summary>
+    /// <returns>How many boxes it filled.</returns>
+    private int GetBoxes(Vector3 eye)
+    {
+        if (_interiors.TakeNewest() is not { } interiors)
+            return 0;
+
+        if (interiors.Count > MostInteriors && !_isTooManyLogged)
+        {
+            Log.Error($"Some interior boxes are not read: the bounce light reads {MostInteriors}.");
+            _isTooManyLogged = true;
+        }
+
+        int count = Math.Min(interiors.Count, MostInteriors);
+        ReadOnlySpan<Transform> transforms = interiors.First;
+        for (int i = 0; i < count; i++)
+        {
+            // About the eye, so the matrix holds small numbers and keeps its precision far from the origin.
+            Transform box = transforms[i] with
+            {
+                Position = transforms[i].Position - eye,
+            };
+            _boxes[i] = Matrix4x4.Invert(box.Matrix, out Matrix4x4 toBox) ? toBox : default;
+        }
+
+        return count;
+    }
 }
 
 /// <summary>
-/// What the grid's passes read beyond the frame, 160 bytes, the twin of <c>PropagateLight.slang</c>'s.
+/// What the grid's passes read beyond the frame, 144 bytes, the twin of <c>PropagateLight.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct VolumeConstants
@@ -229,8 +288,6 @@ internal record struct VolumeConstants
 
     public float Cell;
 
-    public Vector3 ToAnchor;
-
     public uint Size;
 
     public uint First;
@@ -239,7 +296,7 @@ internal record struct VolumeConstants
 
     public uint Sum;
 
-    public uint Walls;
+    public uint Inside;
 
     public uint MapView;
 
@@ -249,11 +306,9 @@ internal record struct VolumeConstants
 
     public uint MapNormal;
 
-    public uint SkyMaps;
+    public uint Interiors;
 
-    public uint SkyCount;
-
-    public uint SkyAtlas;
+    public uint InteriorCount;
 
     public uint Output;
 
