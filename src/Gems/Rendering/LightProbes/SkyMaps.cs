@@ -21,7 +21,7 @@ namespace Magic.LightProbes;
 /// those of the oldest box first; until then each is tested by its own view. When the world changes, the rectangle of
 /// each map that the old and the new bounds of a still instance cover waits to be drawn again: at most a number of maps
 /// a frame, in a fixed round, so each change is whole in a bounded number of frames. A new change to a map that waits
-/// joins its rectangle.
+/// joins its rectangle. A frame with budget left over also draws one map whole again, in a fixed round.
 /// </para>
 /// </remarks>
 internal sealed class SkyMaps
@@ -36,6 +36,11 @@ internal sealed class SkyMaps
     private readonly Vector3[] _directions;
 
     private int _round;
+
+    /// <summary>
+    /// The map that is drawn whole again next, when a frame has budget left over.
+    /// </summary>
+    private int _refresh;
 
     internal SkyMaps(int count, int columns, float region, float snap, int mapSize)
     {
@@ -164,6 +169,21 @@ internal sealed class SkyMaps
                 AddDraw(CreateView(i, box, anchor), GetRect(i));
                 whole++;
             }
+        }
+
+        // A frame with budget left over draws one more map whole again, in a fixed round, so what a change did not
+        // mark, such as a model or its clusters that arrived after the map was drawn, is right again in a few seconds.
+        if (whole < wholePerFrame)
+        {
+            MapState map = _maps[_refresh];
+            if (map.IsDrawn && !map.IsWholeThisFrame)
+            {
+                map.IsWholeThisFrame = true;
+                map.Pending = Rectangle.Empty;
+                AddDraw(CreateView(_refresh, map.Box, anchor), GetRect(_refresh));
+            }
+
+            _refresh = (_refresh + 1) % Count;
         }
 
         // Then the parts that wait, a number of maps a frame, in a fixed round.
