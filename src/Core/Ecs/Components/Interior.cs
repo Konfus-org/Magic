@@ -2,7 +2,7 @@ namespace Magic.Ecs.Components;
 
 /// <summary>
 /// A box that is inside: a room, a cave or a sealed space, which light from outside does not spread into through its
-/// walls.
+/// walls, and which gets only a share of the sky's light.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,4 +15,13 @@ namespace Magic.Ecs.Components;
 /// point in a box only from inside, and a point outside only from outside.
 /// </para>
 /// </remarks>
-public record struct Interior : IComponent;
+public record struct Interior : IComponent
+{
+    /// <summary>
+    /// The share of the sky's light that reaches the surfaces in the box, from 0 to 1: how much of the sky its windows
+    /// and doors let in. Where boxes overlap, the least share holds.
+    /// </summary>
+    public float SkyLight = 0.3f;
+
+    public Interior() { }
+}

@@ -28,6 +28,8 @@ internal sealed class RenderInputs
 
     internal EcsSnapshot<Transform, RectLight> RectLights { get; } = new();
 
+    internal EcsSnapshot<Transform, Interior> Interiors { get; } = new();
+
     /// <summary>
     /// The number of the world the frame is of, new each time a domain replaces it.
     /// </summary>

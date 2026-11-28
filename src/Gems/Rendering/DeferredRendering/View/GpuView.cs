@@ -157,6 +157,14 @@ public readonly record struct GpuView
     public required Vector3 SunDirection { get; init; }
 
     /// <summary>
+    /// The world's <see cref="Ecs.Components.Interior"/> boxes about the view's camera, as <see cref="GpuInterior"/>
+    /// rows, and how many.
+    /// </summary>
+    public required GpuBuffer Interiors { get; init; }
+
+    public required int InteriorCount { get; init; }
+
+    /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU.
     /// </summary>
     /// <remarks>

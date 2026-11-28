@@ -19,6 +19,7 @@ import Core.Frame;
 import Core.Math;
 import Scene.Lights;
 import Scene.ShadowViews;
+import Light.Ambient;
 import Sky.ISky;
 
 // What the passes read beyond the frame, C#'s VolumeConstants, 144 bytes.
@@ -113,19 +114,10 @@ float3 GetCellCenter(VolumeConstants constants, uint3 cell)
     return constants.origin + (float3(cell) + 0.5) * constants.cell;
 }
 
-// Whether a camera-relative point is in an interior box. Each box is the matrix from the camera-relative world to its
-// unit cube.
+// Whether a camera-relative point is in an interior box of the view.
 bool IsInside(VolumeConstants constants, float3 point)
 {
-    ArrayRef<float4x4> boxes = { constants.interiors };
-    for (uint i = 0u; i < constants.interiorCount; i++)
-    {
-        float3 local = mul(float4(point, 1.0), boxes[i]).xyz;
-        if (all(abs(local) <= 0.5))
-            return true;
-    }
-
-    return false;
+    return IsInInterior(constants.interiors, constants.interiorCount, point);
 }
 
 // Whether a cell is inside, as the find of the inside stored it.

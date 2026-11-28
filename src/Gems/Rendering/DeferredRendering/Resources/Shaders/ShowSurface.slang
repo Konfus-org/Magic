@@ -153,7 +153,8 @@ float3 GetSkyVisibilityView(FrameConstants frame, uint2 pixel)
         return float3(1.0);
 
     float3 normal = LoadNormal(frame.gbufferNormal, pixel);
-    return float3(LoadSkyVisibility(GetAmbientTerms(), frame, pixel, depth, normal).x);
+    float3 relative = ReconstructPixel(frame, pixel, depth);
+    return float3(LoadSkyVisibility(GetAmbientTerms(), frame, pixel, depth, relative, normal).x);
 }
 
 [shader("compute")]

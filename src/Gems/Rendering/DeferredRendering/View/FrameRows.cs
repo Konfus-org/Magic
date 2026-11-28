@@ -264,7 +264,7 @@ public record struct GpuAmbient
 {
     public const int Offset = GpuLocalShadows.Offset + GpuLocalShadows.Bytes;
 
-    public const int Bytes = 32;
+    public const int Bytes = 40;
 
     /// <summary>
     /// The visibility of the ambient light at each pixel, from 0 to 1.
@@ -302,6 +302,13 @@ public record struct GpuAmbient
     /// The sun's light that one bounce brings to each pixel, at half size, 0 for none.
     /// </summary>
     public uint Bounce;
+
+    /// <summary>
+    /// The view's interior boxes, as <see cref="GpuInterior"/> rows, and how many, which scale the sky's light.
+    /// </summary>
+    public uint Interiors;
+
+    public uint InteriorCount;
 }
 
 /// <summary>

@@ -99,7 +99,7 @@ float3 ShadeIndirectLight<S : ISky>(
     AmbientTerms ambient = GetAmbientTerms();
     float occlusion = LoadAmbientOcclusion(ambient, pixel);
     float3 bent = LoadBentNormal(ambient, pixel, normal);
-    float2 skySeen = LoadSkyVisibility(ambient, frame, pixel, depth, normal);
+    float2 skySeen = LoadSkyVisibility(ambient, frame, pixel, depth, relative, normal);
     bool isTraced = indirect.diffuse != 0u;
     float3 diffuse;
     if (isTraced)

@@ -11,7 +11,7 @@ import Scene.Shadows;
 
 // Where the ambient terms are in the frame's buffer, right after the local lights' shadows, and their bytes.
 public static const uint AmbientOffset = LocalShadowsOffset + LocalShadowsBytes;
-public static const uint AmbientBytes = 32u;
+public static const uint AmbientBytes = 40u;
 
 public struct AmbientTerms
 {
@@ -27,7 +27,50 @@ public struct AmbientTerms
     public uint sampler;
     // The sun's light that one bounce brings to each pixel, at half size.
     public uint bounce;
+    // The view's interior boxes, as GpuInterior rows, and how many.
+    public uint interiors;
+    public uint interiorCount;
 }
+
+// One interior box, C#'s GpuInterior: the matrix from the camera-relative world to its unit cube, grown a little on
+// each side, and the share of the sky's light in it.
+public struct GpuInterior
+{
+    public float4x4 toBox;
+    public float skyLight;
+    public float3 padding;
+}
+
+// The share of the sky's light at a camera-relative point: the least share of the interior boxes it is in, 1 in none.
+public float GetInteriorSkyLight(uint interiors, uint count, float3 point)
+{
+    ArrayRef<GpuInterior> boxes = { interiors };
+    float share = 1.0;
+    for (uint i = 0u; i < count; i++)
+    {
+        GpuInterior box = boxes[i];
+        if (all(abs(mul(float4(point, 1.0), box.toBox).xyz) <= 0.5))
+            share = min(share, box.skyLight);
+    }
+
+    return share;
+}
+
+// Whether a camera-relative point is in an interior box.
+public bool IsInInterior(uint interiors, uint count, float3 point)
+{
+    ArrayRef<GpuInterior> boxes = { interiors };
+    for (uint i = 0u; i < count; i++)
+    {
+        if (all(abs(mul(float4(point, 1.0), boxes[i].toBox).xyz) <= 0.5))
+            return true;
+    }
+
+    return false;
+}
+
+// The metres in front of a surface at which a pixel finds the interior box it is in: past the error of its depth.
+static const float InteriorOffset = 0.05;
 
 public AmbientTerms GetAmbientTerms() { return LoadFrameRow<AmbientTerms>(AmbientOffset); }
 
@@ -128,14 +171,22 @@ public float3 SampleSkyMap(AmbientTerms terms, float3 direction, float roughness
     return map.SampleLevel(sampler, ToOctahedralUv(direction), level).rgb;
 }
 
-// The share of the sky a pixel sees, diffuse in x and specular in y, from the half-size visibility. All of the sky
-// where no gem makes it.
-public float2 LoadSkyVisibility(AmbientTerms terms, FrameConstants frame, uint2 pixel, float depth, float3 normal)
+// The share of the sky a pixel at a camera-relative point sees, diffuse in x and specular in y: the half-size
+// visibility, all of the sky where no gem makes it, times the share of the interior boxes the point is in.
+public float2 LoadSkyVisibility(
+    AmbientTerms terms,
+    FrameConstants frame,
+    uint2 pixel,
+    float depth,
+    float3 relative,
+    float3 normal
+)
 {
+    float share = GetInteriorSkyLight(terms.interiors, terms.interiorCount, relative + normal * InteriorOffset);
     if (terms.skyVisibility == 0u)
-        return float2(1.0);
+        return float2(share);
 
-    return LoadHalfSize(terms.skyVisibility, frame, pixel, depth, normal).xy;
+    return LoadHalfSize(terms.skyVisibility, frame, pixel, depth, normal).xy * share;
 }
 
 // The sun's light that one bounce brings to a pixel, from the half-size bounce. None where no gem makes it.

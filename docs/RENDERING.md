@@ -349,6 +349,8 @@ it. The `Interior` boxes of the world mark what is inside. The settings are in
 - The grid is coarse, so the light is soft. Without a box, light creeps round a wall thinner than a cell. A box has no
   openings, so no bounce light from outside comes in through a door or a window. The sun's light that falls inside
   through them bounces inside.
+- DeferredRendering puts the `Interior` boxes into each view. The sky's light on a surface in a box, diffuse and
+  reflected, is multiplied by the box's `SkyLight` share (0.3 by default), the least share where boxes overlap.
 
 ## GlobalIllumination
 

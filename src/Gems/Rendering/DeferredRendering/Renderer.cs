@@ -156,6 +156,8 @@ public sealed class Renderer
 
     private readonly LightTiles _lightTiles;
 
+    private readonly InteriorBoxes _interiors;
+
     /// <summary>
     /// Every shader the view's passes run, which the GPU provider builds before the frame is made.
     /// </summary>
@@ -274,6 +276,7 @@ public sealed class Renderer
         );
         _instances = new InstanceTable(assets, gpu, _resources);
         _lightTiles = new LightTiles(assets, gpu);
+        _interiors = new InteriorBoxes(gpu);
         _banner = new FailureBanner(assets, gpu);
         _cover = new Cover(assets, gpu);
         _viewShaders = _lightTiles.Shaders;
@@ -610,6 +613,12 @@ public sealed class Renderer
             frame.View
         );
         Result<GpuBuffer> tiles = _lightTiles.PrepareTiles(frame.View, width, height);
+        Result<(GpuBuffer Boxes, int Count)> interiors = _interiors.Prepare(
+            graph,
+            frame.View,
+            inputs.Interiors,
+            camera.Transform.Position
+        );
         Result asked = Result.FindFailure(
             constants,
             depth,
@@ -623,7 +632,8 @@ public sealed class Renderer
             velocity,
             hdr,
             output,
-            tiles
+            tiles,
+            interiors
         );
         if (!asked.Ok)
         {
@@ -683,6 +693,8 @@ public sealed class Renderer
             LightCount = world.Lights.Count,
             PreparedDomains = world.PreparedDomains,
             SunDirection = sun.Direction,
+            Interiors = interiors.Value.Boxes,
+            InteriorCount = interiors.Value.Count,
         };
 
         // The camera jitters while the picture's effects ask for it, or while a gem upscales. A frame that an HDR
@@ -783,6 +795,8 @@ public sealed class Renderer
             Sampler = input.SkyLight?.Sampler.Id ?? 0,
             SkyVisibility = input.SkyVisibility?.Visibility.Id ?? 0,
             Bounce = input.Bounce?.Irradiance.Id ?? 0,
+            Interiors = input.View.Interiors.Id,
+            InteriorCount = (uint)input.View.InteriorCount,
         };
         SkyVisibility? skySeen = null;
         BounceLight? bounce = null;
@@ -822,7 +836,8 @@ public sealed class Renderer
                 gpu.Depth,
                 gpu.GBufferNormal,
                 gpu.GBufferBase,
-                gpu.GBufferSurface
+                gpu.GBufferSurface,
+                gpu.Interiors
             )
             .Reads(indirect);
         if (input.Shadows is { } shadows)
@@ -858,6 +873,7 @@ public sealed class Renderer
                 .Compute("Shade translucent", translucentShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
                 .Reads(tables)
                 .Reads(gpu.Frame, gpu.Depth, gpu.GlassDepth, gpu.GlassBase, gpu.GlassNormal, gpu.GlassSurface)
+                .Reads(gpu.Interiors)
                 .Reads(indirect);
             if (input.Traced is { } traced)
                 translucent.Reads(traced.HitMaterials, gpu.Meshes, gpu.Instances);
@@ -932,7 +948,7 @@ public sealed class Renderer
             .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal, gpu.GBufferBase, gpu.GBufferSurface, gpu.Velocity, gpu.Hdr)
             .Reads(input.Shadows?.CascadeAtlas ?? GpuTexture.None, input.Shadows?.SunDetails ?? GpuTexture.None)
             .Reads(local?.Atlas ?? GpuTexture.None, occlusion?.Occlusion ?? GpuTexture.None)
-            .Reads(skySeen?.Visibility ?? GpuTexture.None)
+            .Reads(skySeen?.Visibility ?? GpuTexture.None, gpu.Interiors)
             .Writes(gpu.Output)
             .DispatchOver(gpu.Width, gpu.Height);
 
@@ -1172,6 +1188,7 @@ public sealed class Renderer
         back.PointLights.Fill(_ecs);
         back.SpotLights.Fill(_ecs);
         back.RectLights.Fill(_ecs);
+        back.Interiors.Fill(_ecs);
         back.WorldNumber = _worldNumber;
         _inputs.Publish();
 

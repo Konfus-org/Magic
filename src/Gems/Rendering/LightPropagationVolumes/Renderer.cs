@@ -4,13 +4,9 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
-using Magic.Ecs;
-using Magic.Ecs.Components;
 using Magic.Graphics;
-using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.LightPropagationVolumes;
@@ -30,8 +26,9 @@ public readonly record struct VolumeInput(GpuView View, BounceViews Views, Bounc
 /// It is Crytek's light propagation volumes (Kaplanyan, SIGGRAPH 2009; Kaplanyan and Dachsbacher, I3D 2010), as the
 /// master's thesis of Bozek, FIT VUT 2016, also builds them. Each frame the texels of the sun's reflective shadow map
 /// put their light into the cells they lie in, the light moves one cell on a number of times, and each pixel reads
-/// the sum. The <see cref="Interior"/> boxes of the world are inside: light does not move between a cell inside and
-/// one outside, and a pixel reads only the cells on its own side, so a sealed room gets no light from outside.
+/// the sum. The view's <see cref="Ecs.Components.Interior"/> boxes are inside: light does not move between a cell
+/// inside and one outside, and a pixel reads only the cells on its own side, so a sealed room gets no light from
+/// outside.
 /// </para>
 /// <para>
 /// The grid has <see cref="Cells"/> cells along each side, each <see cref="LightPropagationVolumesSettings.CellSize"/>
@@ -47,17 +44,6 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
 
     private const int MostSteps = 32;
 
-    /// <summary>
-    /// The most interior boxes that the grid reads.
-    /// </summary>
-    private const int MostInteriors = 64;
-
-    /// <summary>
-    /// The metres that each interior box grows by on each side, so that a surface on its face, and a point that the
-    /// depth puts a little behind that face, is inside.
-    /// </summary>
-    private const float InteriorMargin = 0.1f;
-
     // A name for each step of the propagation: GPU timings are kept by name.
     private static readonly ImmutableArray<string> _stepNames =
     [
@@ -67,12 +53,6 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
     private readonly LightPropagationVolumesSettings _settings;
 
     private readonly IGraphicsApi _gpu;
-
-    private readonly IEcs _ecs;
-
-    private readonly Mailbox<EcsSnapshot<Transform, Interior>> _interiors = new();
-
-    private readonly Matrix4x4[] _boxes = new Matrix4x4[MostInteriors];
 
     private readonly ShaderEntry _injectShader;
 
@@ -84,16 +64,10 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
 
     private readonly ImmutableArray<ShaderTypeArgument> _openSky;
 
-    /// <summary>
-    /// Whether the error for more boxes than the grid reads is shown, so it shows one time and not each frame.
-    /// </summary>
-    private bool _isTooManyLogged;
-
-    internal Renderer(LightPropagationVolumesSettings settings, AssetManager assets, IEcs ecs, IGraphicsApi gpu)
+    internal Renderer(LightPropagationVolumesSettings settings, AssetManager assets, IGraphicsApi gpu)
     {
         _settings = settings;
         _gpu = gpu;
-        _ecs = ecs;
         _injectShader = PassShaders.GetEntry(assets, "PropagateLight", "InjectLight");
         _insideShader = PassShaders.GetEntry(assets, "PropagateLight", "FindInside");
         _propagateShader = PassShaders.GetEntry(assets, "PropagateLight", "PropagateLight");
@@ -147,11 +121,7 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             new("Light volume constants", Unsafe.SizeOf<VolumeConstants>()),
             frame.View
         );
-        Result<GpuBuffer> interiors = _gpu.GetBuffer(
-            new("Interior boxes", MostInteriors * Unsafe.SizeOf<Matrix4x4>()),
-            frame.View
-        );
-        Result asked = Result.FindFailure(first, second, sum, inside, output, constants, interiors);
+        Result asked = Result.FindFailure(first, second, sum, inside, output, constants);
         if (!asked.Ok)
         {
             frame.Fail(RenderFailure.Resource, "Bounce light is not spread", asked.Error);
@@ -168,7 +138,6 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             (MathF.Floor(eye.Y / cell) - (Cells / 2)) * cell,
             (MathF.Floor(eye.Z / cell) - (Cells / 2)) * cell
         );
-        int boxCount = GetBoxes(eye);
         VolumeConstants row = new()
         {
             ClipToRelative = input.Views.ClipToRelative,
@@ -183,8 +152,8 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
             MapDepth = input.Maps.Depth.Id,
             MapAlbedo = input.Maps.Albedo.Id,
             MapNormal = input.Maps.Normal.Id,
-            Interiors = interiors.Value.Id,
-            InteriorCount = (uint)boxCount,
+            Interiors = view.Interiors.Id,
+            InteriorCount = (uint)view.InteriorCount,
             Output = output.Value.Id,
             HalfWidth = (uint)halfWidth,
             HalfHeight = (uint)halfHeight,
@@ -193,21 +162,18 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
         if (!graph.Upload(constants.Value, [row]))
             return null;
 
-        if (boxCount > 0 && !graph.Upload(interiors.Value, _boxes.AsSpan(0, boxCount)))
-            return null;
-
         GpuConstants header = new(view.Frame.Id, constants.Value.Id);
         ReadOnlySpan<GpuResource> tables = input.Tables is { HasTables: true } made
             ? [made.Transmittance, made.View]
             : [];
         graph
             .Compute("Find the inside", _insideShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, interiors.Value)
+            .Reads(view.Frame, constants.Value, view.Interiors)
             .Writes(inside.Value)
             .DispatchOver(Cells, Cells, Cells);
         graph
             .Compute("Inject light", injectShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, input.Views.Views, interiors.Value)
+            .Reads(view.Frame, constants.Value, input.Views.Views, view.Interiors)
             .Reads(input.Maps.Depth, input.Maps.Albedo, input.Maps.Normal)
             .Reads(tables)
             .Writes(first.Value, sum.Value)
@@ -233,53 +199,12 @@ public sealed class Renderer : IRender<VolumeInput, BounceLight>
 
         graph
             .Compute("Light pixels from the volume", _pixelShader, header, RenderStages.Light)
-            .Reads(view.Frame, constants.Value, sum.Value, inside.Value, interiors.Value)
+            .Reads(view.Frame, constants.Value, sum.Value, inside.Value, view.Interiors)
             .Reads(view.Depth, view.GBufferNormal)
             .Writes(output.Value)
             .DispatchOver(halfWidth, halfHeight);
 
         return new BounceLight(output.Value);
-    }
-
-    /// <summary>
-    /// Publishes the world's interior boxes for the frames to come. Game thread.
-    /// </summary>
-    internal void PublishInteriors()
-    {
-        _interiors.Back.Fill(_ecs);
-        _interiors.Publish();
-    }
-
-    /// <summary>
-    /// Fills the boxes with the matrix of each interior box, grown by <see cref="InteriorMargin"/>, from the
-    /// camera-relative world, about <paramref name="eye"/>, to its unit cube.
-    /// </summary>
-    /// <returns>How many boxes it filled.</returns>
-    private int GetBoxes(Vector3 eye)
-    {
-        if (_interiors.TakeNewest() is not { } interiors)
-            return 0;
-
-        if (interiors.Count > MostInteriors && !_isTooManyLogged)
-        {
-            Log.Error($"Some interior boxes are not read: the bounce light reads {MostInteriors}.");
-            _isTooManyLogged = true;
-        }
-
-        int count = Math.Min(interiors.Count, MostInteriors);
-        ReadOnlySpan<Transform> transforms = interiors.First;
-        for (int i = 0; i < count; i++)
-        {
-            // About the eye, so the matrix holds small numbers and keeps its precision far from the origin.
-            Transform box = transforms[i] with
-            {
-                Position = transforms[i].Position - eye,
-                Scale = transforms[i].Scale + new Vector3(2 * InteriorMargin),
-            };
-            _boxes[i] = Matrix4x4.Invert(box.Matrix, out Matrix4x4 toBox) ? toBox : default;
-        }
-
-        return count;
     }
 }
 
